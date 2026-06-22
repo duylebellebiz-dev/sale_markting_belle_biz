@@ -1,0 +1,707 @@
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { InvoiceStatus, Prisma } from '@prisma/client';
+import { PrismaService } from '../prisma/prisma.service';
+import { EmailService } from '../email/email.service';
+import { InvoicePdfService } from './invoice-pdf.service';
+import { CreateInvoiceDto, LineItemDto } from './dto/create-invoice.dto';
+import { UpdateInvoiceDto } from './dto/update-invoice.dto';
+import { AddPaymentDto } from './dto/add-payment.dto';
+import { UpdatePromisedDateDto } from './dto/update-promised-date.dto';
+import { SendInvoiceEmailDto } from './dto/send-invoice-email.dto';
+import type { RequestUser } from '../common/decorators/current-user.decorator';
+
+// ─── Relations included on every invoice response ──────────────────────────────
+const INVOICE_INCLUDE = {
+  lineItems: { orderBy: { sortOrder: 'asc' as const } },
+  payments:  { orderBy: { date:      'asc' as const } },
+  customer: {
+    select: {
+      id: true,
+      customerName: true,
+      shopName: true,
+      shopAddress: true,
+      email: true,
+      phoneNumber: true,
+      assignedToId: true,
+    },
+  },
+} satisfies Prisma.InvoiceInclude;
+
+// ─── Server-side totals computation ────────────────────────────────────────────
+
+function r2(n: number) {
+  return Math.round(n * 100) / 100;
+}
+
+interface ComputedItem {
+  serviceId:   string | null;
+  description: string;
+  serviceTerm: string;
+  quantity:    number;
+  rate:        number;
+  amount:      number;
+}
+
+interface ComputedTotals {
+  lineItems:  ComputedItem[];
+  subTotal:   number;
+  taxAmount:  number;
+  total:      number;
+  balanceDue: number;
+}
+
+function computeTotals(
+  rawItems: LineItemDto[],
+  discount: number,
+  shippingCharges: number,
+  adjustment: number,
+  taxRate: number,
+  amountPaid: number,
+): ComputedTotals {
+  const lineItems: ComputedItem[] = rawItems.map((i) => ({
+    serviceId:   i.serviceId ?? null,
+    description: i.description,
+    serviceTerm: i.serviceTerm ?? '',
+    quantity:    i.quantity,
+    rate:        i.rate,
+    amount:      r2(i.quantity * i.rate),
+  }));
+
+  const subTotal      = r2(lineItems.reduce((s, i) => s + i.amount, 0));
+  const discountAmount = r2(subTotal * discount / 100);
+  const afterDiscount = r2(subTotal - discountAmount);
+  const taxableBase   = r2(afterDiscount + shippingCharges + adjustment);
+  const taxAmount     = r2(taxableBase * taxRate / 100);
+  const total         = r2(taxableBase + taxAmount);
+  const balanceDue    = r2(total - amountPaid);
+
+  return { lineItems, subTotal, taxAmount, total, balanceDue };
+}
+
+/** Replace {variable} tokens with context values. Unknown tokens → empty string. */
+function renderTemplate(html: string, ctx: Record<string, string>): string {
+  return html.replace(/\{(\w+)\}/g, (_, key: string) => ctx[key] ?? '');
+}
+
+// ───────────────────────────────────────────────────────────────────────────────
+
+@Injectable()
+export class InvoicesService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly emailService: EmailService,
+    private readonly pdfService: InvoicePdfService,
+  ) {}
+
+  // ---------------------------------------------------------------------------
+  // Access helpers
+  // ---------------------------------------------------------------------------
+
+  private async resolveCustomer(user: RequestUser, customerId: string) {
+    const where: Prisma.CustomerWhereInput = {
+      id: customerId,
+      businessId: user.businessId,
+    };
+    if (user.role === 'salesperson' && !user.permissions?.viewAllCustomers) {
+      where.assignedToId = user.userId;
+    }
+    const customer = await this.prisma.customer.findFirst({ where });
+    if (!customer) throw new NotFoundException('Customer not found');
+    return customer;
+  }
+
+  private async resolveInvoice(user: RequestUser, invoiceId: string) {
+    const invoice = await this.prisma.invoice.findFirst({
+      where: { id: invoiceId, businessId: user.businessId },
+      include: INVOICE_INCLUDE,
+    });
+    if (!invoice) throw new NotFoundException('Invoice not found');
+
+    if (user.role === 'salesperson' && !user.permissions?.viewAllCustomers) {
+      if (invoice.customer.assignedToId !== user.userId) {
+        throw new NotFoundException('Invoice not found');
+      }
+    }
+
+    return invoice;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Auto-generate sequential invoice number per business
+  // ---------------------------------------------------------------------------
+
+  async nextInvoiceNumber(businessId: string): Promise<string> {
+    const count = await this.prisma.invoice.count({ where: { businessId } });
+    const candidate = `INV-${String(count + 1).padStart(3, '0')}`;
+
+    const exists = await this.prisma.invoice.findFirst({
+      where: { businessId, invoiceNumber: candidate },
+      select: { id: true },
+    });
+    if (!exists) return candidate;
+
+    // Conflict after deletion — fall back to timestamp
+    return `INV-${Date.now()}`;
+  }
+
+  // ---------------------------------------------------------------------------
+  // CRUD
+  // ---------------------------------------------------------------------------
+
+  async create(user: RequestUser, dto: CreateInvoiceDto) {
+    const customer = await this.resolveCustomer(user, dto.customerId);
+
+    let invoiceNumber = dto.invoiceNumber?.trim();
+    if (!invoiceNumber) {
+      invoiceNumber = await this.nextInvoiceNumber(user.businessId);
+    } else {
+      const dup = await this.prisma.invoice.findFirst({
+        where: { businessId: user.businessId, invoiceNumber },
+        select: { id: true },
+      });
+      if (dup) throw new ConflictException('Invoice number already exists');
+    }
+
+    const business = await this.prisma.business.findUnique({
+      where: { id: user.businessId },
+      select: { defaultTaxRate: true, defaultCustomerNote: true, defaultTerms: true },
+    });
+
+    const taxRate        = dto.taxRate        ?? business?.defaultTaxRate ?? 0;
+    const discount       = dto.discount       ?? 0;
+    const shippingCharges = dto.shippingCharges ?? 0;
+    const adjustment     = dto.adjustment     ?? 0;
+
+    const computed = computeTotals(dto.lineItems, discount, shippingCharges, adjustment, taxRate, 0);
+
+    const billTo = {
+      name:        customer.shopName  || customer.customerName || '',
+      addressLine: customer.shopAddress ?? '',
+      email:       customer.email      ?? '',
+      phone:       customer.phoneNumber ?? '',
+    };
+
+    return this.prisma.invoice.create({
+      data: {
+        businessId:      user.businessId,
+        customerId:      customer.id,
+        invoiceNumber,
+        invoiceDate:     dto.invoiceDate ? new Date(dto.invoiceDate) : new Date(),
+        dueDate:         dto.dueDate ? new Date(dto.dueDate) : undefined,
+        terms:           dto.terms ?? '',
+        billTo:          billTo as unknown as Prisma.InputJsonValue,
+        subTotal:        computed.subTotal,
+        discount,
+        shippingCharges,
+        adjustment,
+        taxRate,
+        province:        dto.province ?? '',
+        taxLabel:        dto.taxLabel ?? '',
+        taxAmount:       computed.taxAmount,
+        total:           computed.total,
+        amountPaid:      0,
+        balanceDue:      computed.balanceDue,
+        customerNote:    dto.customerNote    ?? business?.defaultCustomerNote ?? '',
+        termsConditions: dto.terms_conditions ?? business?.defaultTerms       ?? '',
+        status:          InvoiceStatus.Draft,
+        lineItems: {
+          create: computed.lineItems.map((item, i) => ({
+            serviceId:   item.serviceId,
+            description: item.description,
+            serviceTerm: item.serviceTerm,
+            quantity:    item.quantity,
+            rate:        item.rate,
+            amount:      item.amount,
+            sortOrder:   i,
+          })),
+        },
+      },
+      include: INVOICE_INCLUDE,
+    });
+  }
+
+  async findAll(user: RequestUser) {
+    const rows = await this.prisma.invoice.findMany({
+      where: { businessId: user.businessId },
+      include: INVOICE_INCLUDE,
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (user.role === 'salesperson' && !user.permissions?.viewAllCustomers) {
+      return rows.filter((inv) => inv.customer.assignedToId === user.userId);
+    }
+
+    return rows;
+  }
+
+  async findOne(user: RequestUser, id: string) {
+    return this.resolveInvoice(user, id);
+  }
+
+  async findByCustomer(user: RequestUser, customerId: string) {
+    await this.resolveCustomer(user, customerId);
+    return this.prisma.invoice.findMany({
+      where: { businessId: user.businessId, customerId },
+      include: INVOICE_INCLUDE,
+      orderBy: { invoiceDate: 'desc' },
+    });
+  }
+
+  async update(user: RequestUser, id: string, dto: UpdateInvoiceDto) {
+    const existing = await this.resolveInvoice(user, id);
+
+    if (dto.invoiceNumber) {
+      const conflict = await this.prisma.invoice.findFirst({
+        where: {
+          businessId:    user.businessId,
+          invoiceNumber: dto.invoiceNumber,
+          NOT: { id },
+        },
+        select: { id: true },
+      });
+      if (conflict) throw new ConflictException('Invoice number already exists');
+    }
+
+    // Build scalar updates
+    const scalarData: Prisma.InvoiceUpdateInput = {};
+    if (dto.invoiceNumber     !== undefined) scalarData.invoiceNumber     = dto.invoiceNumber;
+    if (dto.invoiceDate       !== undefined) scalarData.invoiceDate       = new Date(dto.invoiceDate);
+    if (dto.dueDate           !== undefined) scalarData.dueDate           = new Date(dto.dueDate);
+    if (dto.terms             !== undefined) scalarData.terms             = dto.terms;
+    if (dto.customerNote      !== undefined) scalarData.customerNote      = dto.customerNote;
+    if (dto.terms_conditions  !== undefined) scalarData.termsConditions   = dto.terms_conditions;
+    if (dto.province          !== undefined) scalarData.province          = dto.province;
+    if (dto.taxLabel          !== undefined) scalarData.taxLabel          = dto.taxLabel;
+
+    const anyPriceChanged =
+      dto.discount       !== undefined ||
+      dto.shippingCharges !== undefined ||
+      dto.adjustment     !== undefined ||
+      dto.taxRate        !== undefined;
+
+    if (dto.lineItems) {
+      // Recompute from new line items via transaction: delete old rows, recreate
+      const discount       = dto.discount       ?? Number(existing.discount);
+      const shippingCharges = dto.shippingCharges ?? Number(existing.shippingCharges);
+      const adjustment     = dto.adjustment     ?? Number(existing.adjustment);
+      const taxRate        = dto.taxRate        ?? existing.taxRate;
+      const amountPaid     = Number(existing.amountPaid);
+
+      const computed = computeTotals(dto.lineItems, discount, shippingCharges, adjustment, taxRate, amountPaid);
+
+      return this.prisma.$transaction(async (tx) => {
+        await tx.invoiceLineItem.deleteMany({ where: { invoiceId: id } });
+        return tx.invoice.update({
+          where: { id },
+          data: {
+            ...scalarData,
+            subTotal:        computed.subTotal,
+            discount,
+            shippingCharges,
+            adjustment,
+            taxRate,
+            taxAmount:       computed.taxAmount,
+            total:           computed.total,
+            balanceDue:      computed.balanceDue,
+            lineItems: {
+              create: computed.lineItems.map((item, i) => ({
+                serviceId:   item.serviceId,
+                description: item.description,
+                serviceTerm: item.serviceTerm,
+                quantity:    item.quantity,
+                rate:        item.rate,
+                amount:      item.amount,
+                sortOrder:   i,
+              })),
+            },
+          },
+          include: INVOICE_INCLUDE,
+        });
+      });
+    } else if (anyPriceChanged) {
+      // Recompute totals from existing line items (no table changes)
+      const discount       = dto.discount       ?? Number(existing.discount);
+      const shippingCharges = dto.shippingCharges ?? Number(existing.shippingCharges);
+      const adjustment     = dto.adjustment     ?? Number(existing.adjustment);
+      const taxRate        = dto.taxRate        ?? existing.taxRate;
+      const amountPaid     = Number(existing.amountPaid);
+
+      const existingItemsAsDto: LineItemDto[] = existing.lineItems.map((li) => ({
+        serviceId:   li.serviceId ?? undefined,
+        description: li.description,
+        serviceTerm: li.serviceTerm,
+        quantity:    Number(li.quantity),
+        rate:        Number(li.rate),
+      }));
+
+      const computed = computeTotals(existingItemsAsDto, discount, shippingCharges, adjustment, taxRate, amountPaid);
+
+      return this.prisma.invoice.update({
+        where: { id },
+        data: {
+          ...scalarData,
+          subTotal:        computed.subTotal,
+          discount,
+          shippingCharges,
+          adjustment,
+          taxRate,
+          taxAmount:       computed.taxAmount,
+          total:           computed.total,
+          balanceDue:      computed.balanceDue,
+        },
+        include: INVOICE_INCLUDE,
+      });
+    } else {
+      return this.prisma.invoice.update({
+        where: { id },
+        data:  scalarData,
+        include: INVOICE_INCLUDE,
+      });
+    }
+  }
+
+  async remove(user: RequestUser, id: string) {
+    await this.resolveInvoice(user, id);
+    await this.prisma.invoice.delete({ where: { id } });
+    return { message: 'Invoice deleted' };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Status actions
+  // ---------------------------------------------------------------------------
+
+  async markSent(user: RequestUser, id: string) {
+    const invoice = await this.resolveInvoice(user, id);
+    if (invoice.status === InvoiceStatus.Cancelled) {
+      throw new BadRequestException('Cannot mark a cancelled invoice as sent');
+    }
+    if (invoice.status === InvoiceStatus.Paid) {
+      throw new BadRequestException('Invoice is already paid');
+    }
+    return this.prisma.invoice.update({
+      where: { id },
+      data: {
+        status:        InvoiceStatus.Sent,
+        reminderStep:  0,
+        nextReminderAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+      },
+      include: INVOICE_INCLUDE,
+    });
+  }
+
+  async markUnpaid(user: RequestUser, id: string) {
+    const invoice = await this.resolveInvoice(user, id);
+    if (invoice.status === InvoiceStatus.Cancelled) {
+      throw new BadRequestException('Cannot reactivate a cancelled invoice');
+    }
+    return this.prisma.invoice.update({
+      where: { id },
+      data: {
+        status:        InvoiceStatus.Sent,
+        reminderStep:  0,
+        nextReminderAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+      },
+      include: INVOICE_INCLUDE,
+    });
+  }
+
+  async cancel(user: RequestUser, id: string) {
+    await this.resolveInvoice(user, id);
+    return this.prisma.invoice.update({
+      where: { id },
+      data: { status: InvoiceStatus.Cancelled, nextReminderAt: null },
+      include: INVOICE_INCLUDE,
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Payment management (§7.2 / §12.4)
+  // ---------------------------------------------------------------------------
+
+  /** Aggregate all Payment rows for this invoice and update amountPaid/balanceDue/status. */
+  private async recomputeAndSavePayments(
+    invoiceId: string,
+    total: number,
+    currentStatus: InvoiceStatus,
+  ) {
+    const agg = await this.prisma.payment.aggregate({
+      where: { invoiceId },
+      _sum: { amount: true },
+    });
+    const amountPaid = r2(Number(agg._sum.amount ?? 0));
+    const balanceDue = r2(total - amountPaid);
+
+    let status: InvoiceStatus;
+    if (balanceDue <= 0) {
+      status = InvoiceStatus.Paid;
+    } else if (amountPaid > 0) {
+      status = InvoiceStatus.PartiallyPaid;
+    } else {
+      status = currentStatus === InvoiceStatus.Overdue
+        ? InvoiceStatus.Overdue
+        : InvoiceStatus.Sent;
+    }
+
+    return this.prisma.invoice.update({
+      where: { id: invoiceId },
+      data: {
+        amountPaid,
+        balanceDue,
+        status,
+        ...(balanceDue <= 0 && { nextReminderAt: null }),
+      },
+      include: INVOICE_INCLUDE,
+    });
+  }
+
+  async markPaid(user: RequestUser, id: string, dto: AddPaymentDto) {
+    const invoice = await this.resolveInvoice(user, id);
+    if (invoice.status === InvoiceStatus.Cancelled) {
+      throw new BadRequestException('Cannot mark a cancelled invoice as paid');
+    }
+
+    await this.prisma.payment.create({
+      data: {
+        invoiceId: id,
+        date:      dto.date ? new Date(dto.date) : new Date(),
+        amount:    dto.amount,
+        method:    dto.method ?? '',
+        note:      dto.note   ?? '',
+      },
+    });
+
+    return this.recomputeAndSavePayments(id, Number(invoice.total), invoice.status);
+  }
+
+  async addPayment(user: RequestUser, id: string, dto: AddPaymentDto) {
+    const invoice = await this.resolveInvoice(user, id);
+    if (invoice.status === InvoiceStatus.Cancelled) {
+      throw new BadRequestException('Cannot add a payment to a cancelled invoice');
+    }
+
+    await this.prisma.payment.create({
+      data: {
+        invoiceId: id,
+        date:      dto.date ? new Date(dto.date) : new Date(),
+        amount:    dto.amount,
+        method:    dto.method ?? '',
+        note:      dto.note   ?? '',
+      },
+    });
+
+    return this.recomputeAndSavePayments(id, Number(invoice.total), invoice.status);
+  }
+
+  async removePayment(user: RequestUser, id: string, paymentId: string) {
+    const invoice = await this.resolveInvoice(user, id);
+    if (invoice.status === InvoiceStatus.Cancelled) {
+      throw new BadRequestException('Cannot remove a payment from a cancelled invoice');
+    }
+
+    const payment = await this.prisma.payment.findFirst({
+      where: { id: paymentId, invoiceId: id },
+    });
+    if (!payment) throw new NotFoundException('Payment entry not found');
+
+    await this.prisma.payment.delete({ where: { id: paymentId } });
+
+    const result = await this.recomputeAndSavePayments(id, Number(invoice.total), invoice.status);
+
+    // Re-arm reminders if balance went back to positive
+    if (Number(result.balanceDue) > 0 && !result.nextReminderAt) {
+      return this.prisma.invoice.update({
+        where: { id },
+        data: {
+          nextReminderAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+          reminderStep:   0,
+        },
+        include: INVOICE_INCLUDE,
+      });
+    }
+
+    return result;
+  }
+
+  async updatePromisedDate(user: RequestUser, id: string, dto: UpdatePromisedDateDto) {
+    await this.resolveInvoice(user, id);
+    return this.prisma.invoice.update({
+      where: { id },
+      data: {
+        promisedPaymentDate: dto.promisedPaymentDate
+          ? new Date(dto.promisedPaymentDate)
+          : null,
+      },
+      include: INVOICE_INCLUDE,
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Email invoice with PDF attached (§12.3b)
+  // ---------------------------------------------------------------------------
+
+  async sendInvoiceEmail(
+    user: RequestUser,
+    invoiceId: string,
+    dto: SendInvoiceEmailDto,
+  ): Promise<{ message: string }> {
+    const invoice = await this.resolveInvoice(user, invoiceId);
+
+    const billTo = invoice.billTo as any;
+    const recipientEmail: string | null =
+      billTo?.email || invoice.customer.email || null;
+
+    if (!recipientEmail) {
+      throw new BadRequestException(
+        'Customer has no email address. Please add an email to the customer record first.',
+      );
+    }
+
+    const biz = await this.prisma.business.findUnique({
+      where: { id: user.businessId },
+      select: { businessName: true },
+    });
+    const bizName = biz?.businessName ?? 'us';
+
+    const firstItem = invoice.lineItems[0] as any;
+    const ctx: Record<string, string> = {
+      customer_name:    billTo?.name || 'Valued Customer',
+      shop_name:        invoice.customer.shopName || '',
+      invoice_amount:   `$${Number(invoice.total).toFixed(2)}`,
+      service_name:     firstItem?.description || '',
+      expiry_date:      '',
+      salesperson_name: '',
+    };
+
+    let subject: string;
+    let bodyHtml: string;
+
+    if (dto.customSubject || dto.customBodyHtml) {
+      subject  = dto.customSubject  || `Invoice #${invoice.invoiceNumber} from ${bizName}`;
+      bodyHtml = dto.customBodyHtml || this.defaultInvoiceHtml(invoice, ctx, bizName);
+    } else if (dto.templateId) {
+      const tpl = await this.prisma.emailTemplate.findFirst({
+        where: { id: dto.templateId, businessId: user.businessId },
+      });
+      if (!tpl) throw new BadRequestException('Email template not found');
+      subject  = renderTemplate(tpl.subject,  ctx);
+      bodyHtml = renderTemplate(tpl.bodyHtml, ctx);
+    } else {
+      subject  = `Invoice #${invoice.invoiceNumber} from ${bizName}`;
+      bodyHtml = this.defaultInvoiceHtml(invoice, ctx, bizName);
+    }
+
+    const pdfBuffer = await this.pdfService.generateBuffer(invoice, user.businessId);
+
+    const providerMessageId = await this.emailService.send({
+      businessId: user.businessId,
+      to: recipientEmail,
+      subject,
+      html: bodyHtml,
+      attachments: [
+        {
+          filename:    `invoice-${invoice.invoiceNumber}.pdf`,
+          content:     pdfBuffer,
+          contentType: 'application/pdf',
+        },
+      ],
+    });
+
+    await this.prisma.emailLog.create({
+      data: {
+        businessId:       user.businessId,
+        customerId:       invoice.customerId,
+        to:               recipientEmail,
+        subject,
+        status:           'sent',
+        providerMessageId,
+        sentAt:           new Date(),
+      },
+    });
+
+    await this.prisma.invoice.update({
+      where: { id: invoiceId },
+      data: {
+        status:        InvoiceStatus.Sent,
+        reminderStep:  0,
+        nextReminderAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+      },
+    });
+
+    return { message: 'Invoice emailed successfully' };
+  }
+
+  private defaultInvoiceHtml(invoice: any, ctx: Record<string, string>, bizName: string): string {
+    return `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#374151;">
+<h2 style="color:#111827;">Invoice #${invoice.invoiceNumber}</h2>
+<p>Dear ${ctx.customer_name},</p>
+<p>Please find your invoice attached to this email.</p>
+<table style="width:100%;border-collapse:collapse;margin:20px 0;">
+  <tr><td style="padding:8px;border:1px solid #E5E7EB;color:#6B7280;">Invoice #</td>
+      <td style="padding:8px;border:1px solid #E5E7EB;font-weight:bold;">${invoice.invoiceNumber}</td></tr>
+  <tr><td style="padding:8px;border:1px solid #E5E7EB;color:#6B7280;">Total</td>
+      <td style="padding:8px;border:1px solid #E5E7EB;font-weight:bold;">${ctx.invoice_amount}</td></tr>
+  <tr><td style="padding:8px;border:1px solid #E5E7EB;color:#6B7280;">Balance Due</td>
+      <td style="padding:8px;border:1px solid #E5E7EB;font-weight:bold;">$${Number(invoice.balanceDue ?? 0).toFixed(2)}</td></tr>
+</table>
+${invoice.customerNote ? `<p style="color:#6B7280;">${invoice.customerNote}</p>` : ''}
+<p>Thank you for your business!</p>
+<p style="color:#6B7280;font-size:12px;">— ${bizName}</p>
+</div>`;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Used internally by the reminder engine — no auth scoping
+  // ---------------------------------------------------------------------------
+
+  findDueInvoices() {
+    const now = new Date();
+    return this.prisma.invoice.findMany({
+      where: {
+        status: { in: [InvoiceStatus.Sent, InvoiceStatus.Overdue, InvoiceStatus.PartiallyPaid] },
+        balanceDue: { gt: 0 },
+        OR: [
+          { nextReminderAt:      { lte: now } },
+          { promisedPaymentDate: { lte: now } },
+        ],
+      },
+      include: {
+        customer: {
+          select: { id: true, customerName: true, assignedToId: true, businessId: true },
+        },
+      },
+    });
+  }
+
+  async advanceInvoiceReminder(invoiceId: string, schedule: number[]) {
+    const invoice = await this.prisma.invoice.findUnique({
+      where: { id: invoiceId },
+      select: { reminderStep: true, status: true },
+    });
+    if (!invoice) return null;
+
+    const nextStep  = invoice.reminderStep + 1;
+    const dayOffset = schedule[nextStep] ?? schedule[schedule.length - 1] ?? 7;
+    const nextReminderAt = new Date(Date.now() + dayOffset * 24 * 60 * 60 * 1000);
+
+    // Escalate Sent → Overdue on first advance
+    const statusUpdate: Partial<{ status: InvoiceStatus }> = {};
+    if (invoice.status === InvoiceStatus.Sent && nextStep > 0) {
+      statusUpdate.status = InvoiceStatus.Overdue;
+    }
+
+    return this.prisma.invoice.update({
+      where: { id: invoiceId },
+      data: {
+        reminderStep:       nextStep,
+        nextReminderAt,
+        promisedPaymentDate: null,
+        ...statusUpdate,
+      },
+    });
+  }
+}
