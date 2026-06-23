@@ -11,6 +11,13 @@ import { AppModule } from './app.module';
   return this.toString();
 };
 
+function parseAllowedOrigins(raw: string | undefined): string[] {
+  return (raw ?? '')
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { rawBody: true });
 
@@ -22,8 +29,19 @@ async function bootstrap() {
     }),
   );
 
+  const allowedOrigins = parseAllowedOrigins(process.env.FRONTEND_URL);
+
   app.enableCors({
-    origin: process.env.FRONTEND_URL ?? 'http://localhost:5173',
+    origin: (origin, callback) => {
+      // Allow server-to-server requests and same-origin requests with no Origin header.
+      if (!origin) return callback(null, true);
+
+      if (!allowedOrigins.length) {
+        return callback(null, origin === 'http://localhost:5173');
+      }
+
+      return callback(null, allowedOrigins.includes(origin));
+    },
     credentials: true,
   });
 
