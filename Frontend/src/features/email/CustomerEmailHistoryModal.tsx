@@ -130,9 +130,9 @@ export default function CustomerEmailHistoryModal({ customerId, customerName, on
                   <tr key={log.id} className="hover:bg-gray-50 transition-colors">
                     <td className="px-4 py-3 max-w-[260px]">
                       <p className="font-medium text-gray-900 truncate">{log.subject || '(no subject)'}</p>
-                      {log.campaignId && (
+                      {log.campaign && (
                         <p className="text-xs text-gray-400 truncate mt-0.5">
-                          Campaign - {fmtDatetime(log.campaignId.createdAt)}
+                          Campaign - {fmtDatetime(log.campaign.createdAt)}
                         </p>
                       )}
                     </td>

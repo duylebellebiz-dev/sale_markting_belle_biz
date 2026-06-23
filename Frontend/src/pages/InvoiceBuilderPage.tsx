@@ -23,7 +23,7 @@ import { CANADA_TAX_RATES, PROVINCE_OPTIONS } from '../lib/canadaTaxRates';
 //  Types 
 
 interface CustomerOption {
-  _id: string;
+  id: string;
   customerName: string;
   shopName?: string;
   phoneNumber?: string;
@@ -31,7 +31,7 @@ interface CustomerOption {
 }
 
 interface ServiceOption {
-  _id: string;
+  id: string;
   name: string;
   price: number;
   isActive: boolean;
@@ -169,7 +169,7 @@ export default function InvoiceBuilderPage() {
   const [actionMsg, setActionMsg] = useState<string | null>(null);
   const [saving,        setSaving]        = useState(false);
   const [pdfing,        setPdfing]        = useState(false);
-  const [sendInvoice,   setSendInvoice]   = useState<import('./invoicesApi').Invoice | null>(null);
+  const [sendInvoice,   setSendInvoice]   = useState<Invoice | null>(null);
 
   //  Live totals 
   const disc = parseFloat(discount) || 0;

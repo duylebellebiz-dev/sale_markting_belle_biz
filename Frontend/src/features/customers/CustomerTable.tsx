@@ -16,11 +16,6 @@ function assigneeName(c: Customer) {
   return '-';
 }
 
-function fmtDate(iso?: string) {
-  if (!iso) return '-';
-  return new Date(iso).toLocaleDateString(undefined, { dateStyle: 'medium' });
-}
-
 function fmtDatetime(iso?: string) {
   if (!iso) return '-';
   return new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });

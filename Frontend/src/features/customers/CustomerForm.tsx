@@ -66,7 +66,7 @@ export default function CustomerForm({ initial, staff, isOwner, onSubmit, onClos
 
   useEffect(() => { firstRef.current?.focus(); }, []);
 
-  function set(field: keyof CustomerPayload, value: string) {
+  function set<K extends keyof CustomerPayload>(field: K, value: CustomerPayload[K]) {
     setForm((f) => ({ ...f, [field]: value }));
   }
 

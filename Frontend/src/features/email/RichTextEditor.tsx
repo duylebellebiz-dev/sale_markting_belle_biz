@@ -15,7 +15,8 @@ interface Props {
 /* ─── Tiny icon components to keep the toolbar readable ─────────────────── */
 function Icon({ d, title }: { d: string; title?: string }) {
   return (
-    <svg title={title} viewBox="0 0 24 24" width="15" height="15" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round">
+    <svg viewBox="0 0 24 24" width="15" height="15" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round">
+      {title ? <title>{title}</title> : null}
       <path d={d} />
     </svg>
   );
@@ -96,7 +97,7 @@ export default function RichTextEditor({ value, onChange, placeholder }: Props) 
   useEffect(() => {
     if (!editor) return;
     if (editor.getHTML() !== value) {
-      editor.commands.setContent(value, false);
+      editor.commands.setContent(value, { emitUpdate: false });
     }
   }, [editor, value]);
 

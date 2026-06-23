@@ -3,8 +3,8 @@ import api from '../../lib/api';
 import CustomerSearchPicker, { type PickedCustomer } from '../customers/CustomerSearchPicker';
 import type { CreateSubscriptionPayload } from './subscriptionsApi';
 
-interface Service  { _id: string; name: string; price: number; isActive: boolean; }
-interface Invoice  { _id: string; invoiceNumber: string; total?: number; }
+interface Service  { id: string; name: string; price: number; isActive: boolean; }
+interface Invoice  { id: string; invoiceNumber: string; total?: number; }
 
 interface Props {
   onSubmit: (payload: CreateSubscriptionPayload) => Promise<void>;

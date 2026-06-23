@@ -5,7 +5,7 @@ import { businessesApi } from '../businesses/businessesApi';
 import type { CreateInvoicePayload, UpdateInvoicePayload, Invoice } from './invoicesApi';
 
 interface Customer {
-  _id: string;
+  id: string;
   customerName: string;
   shopName?: string;
   phoneNumber?: string;

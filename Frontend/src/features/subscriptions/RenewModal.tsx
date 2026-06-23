@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import api from '../../lib/api';
 import type { Subscription, RenewPayload } from './subscriptionsApi';
 
-interface Invoice { _id: string; invoiceNumber: string; amount: number; }
+interface Invoice { id: string; invoiceNumber: string; total?: number; }
 
 interface Props {
   subscription: Subscription;

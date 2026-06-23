@@ -2,12 +2,10 @@ import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import AppShell from '../components/AppShell';
 import InvoiceStatusBadge from '../features/invoices/InvoiceStatusBadge';
-import MarkPaidModal from '../features/invoices/MarkPaidModal';
 import SendInvoiceEmailModal from '../features/invoices/SendInvoiceEmailModal';
 import { invoicesApi } from '../features/invoices/invoicesApi';
 import type { Invoice } from '../features/invoices/invoicesApi';
 import { usePermission } from '../features/staff/usePermission';
-import { useAuth } from '../context/AuthContext';
 
 //  Helpers 
 
@@ -214,7 +212,6 @@ type ActionModal = { type: 'sendEmail' } | null;
 export default function InvoiceDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { user } = useAuth();
   const canInvoice   = usePermission('createInvoice');
   const canExportPdf = usePermission('exportInvoicePdf');
   const canSendEmail = usePermission('sendEmail');
@@ -247,7 +244,7 @@ export default function InvoiceDetailPage() {
     setActionError(null);
     try {
       const result = await fn();
-      if (result && typeof result === 'object' && '_id' in result) {
+      if (result && typeof result === 'object' && 'id' in result) {
         setInvoice(result as Invoice);
       }
     } catch (err: unknown) {

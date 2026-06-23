@@ -471,7 +471,7 @@ function FileCard({
   fileRef, file, onChange, onValidate, disabled, loading,
   accent = 'indigo',
 }: {
-  fileRef: React.RefObject<HTMLInputElement>;
+  fileRef: React.RefObject<HTMLInputElement | null>;
   file: File | null;
   onChange: (f: File | null) => void;
   onValidate: () => void;

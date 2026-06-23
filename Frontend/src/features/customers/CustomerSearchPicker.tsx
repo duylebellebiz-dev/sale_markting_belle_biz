@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from 'react';
 import { customersApi } from './customersApi';
 
 export interface PickedCustomer {
-  _id: string;
+  id: string;
   customerName: string;
   shopName?: string;
   email?: string;
