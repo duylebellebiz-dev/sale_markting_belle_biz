@@ -456,8 +456,12 @@ export default function InvoiceDetailPage() {
             {invoice.billTo?.addressLine && (
               <p className="text-sm text-gray-600 mt-1 whitespace-pre-line">{invoice.billTo.addressLine}</p>
             )}
-            {invoice.billTo?.email && <p className="text-sm text-gray-500 mt-1">{invoice.billTo.email}</p>}
-            {invoice.billTo?.phone && <p className="text-sm text-gray-500">{invoice.billTo.phone}</p>}
+            {!invoice.billTo?.addressLine && invoice.billTo?.email && (
+              <p className="text-sm text-gray-500 mt-1">{invoice.billTo.email}</p>
+            )}
+            {!invoice.billTo?.addressLine && invoice.billTo?.phone && (
+              <p className="text-sm text-gray-500">{invoice.billTo.phone}</p>
+            )}
           </section>
 
           {/* Invoice meta */}

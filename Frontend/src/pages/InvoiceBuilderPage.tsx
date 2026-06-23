@@ -26,6 +26,7 @@ interface CustomerOption {
   id: string;
   customerName: string;
   shopName?: string;
+  shopAddress?: string;
   phoneNumber?: string;
   email?: string;
 }
@@ -97,11 +98,23 @@ function extractMsg(err: unknown) {
 function cLabel(c: CustomerOption) {
   return c.shopName ? `${c.customerName} - ${c.shopName}` : c.customerName;
 }
+function billToName(c: CustomerOption | null) {
+  if (!c) return '-';
+  return c.shopName?.trim() || c.customerName;
+}
+function addressLines(address?: string) {
+  if (!address?.trim()) return [];
+  return address
+    .split(/\r?\n|,\s*/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
 function matchC(c: CustomerOption, q: string) {
   const l = q.toLowerCase();
   return (
     c.customerName.toLowerCase().includes(l) ||
     (c.shopName ?? '').toLowerCase().includes(l) ||
+    (c.shopAddress ?? '').toLowerCase().includes(l) ||
     (c.phoneNumber ?? '').includes(q) ||
     (c.email ?? '').toLowerCase().includes(l)
   );
@@ -526,10 +539,20 @@ export default function InvoiceBuilderPage() {
               {isEditing ? (
                 <div className="space-y-1">
                   <p className="font-semibold text-gray-900 text-sm">
-                    {selectedCustomer ? cLabel(selectedCustomer) : '-'}
+                    {billToName(selectedCustomer)}
                   </p>
-                  {selectedCustomer?.email     && <p className="text-xs text-gray-500">{selectedCustomer.email}</p>}
-                  {selectedCustomer?.phoneNumber && <p className="text-xs text-gray-500">{selectedCustomer.phoneNumber}</p>}
+                  {addressLines(selectedCustomer?.shopAddress).length > 0 ? (
+                    <div className="text-xs text-gray-500 leading-5">
+                      {addressLines(selectedCustomer?.shopAddress).map((line, idx) => (
+                        <p key={`${line}-${idx}`}>{line}</p>
+                      ))}
+                    </div>
+                  ) : (
+                    <>
+                      {selectedCustomer?.email && <p className="text-xs text-gray-500">{selectedCustomer.email}</p>}
+                      {selectedCustomer?.phoneNumber && <p className="text-xs text-gray-500">{selectedCustomer.phoneNumber}</p>}
+                    </>
+                  )}
                 </div>
               ) : (
                 <div className="relative" ref={custDdRef}>
@@ -563,14 +586,24 @@ export default function InvoiceBuilderPage() {
                   )}
                   {selectedCustomer && (
                     <div className="mt-2 space-y-0.5">
-                      {selectedCustomer.email     && <p className="text-xs text-gray-500">{selectedCustomer.email}</p>}
-                      {selectedCustomer.phoneNumber && <p className="text-xs text-gray-500">{selectedCustomer.phoneNumber}</p>}
-                      {!selectedCustomer.email && (
+                      {addressLines(selectedCustomer.shopAddress).length > 0 ? (
+                        <div className="text-xs text-gray-500 leading-5">
+                          {addressLines(selectedCustomer.shopAddress).map((line, idx) => (
+                            <p key={`${line}-${idx}`}>{line}</p>
+                          ))}
+                        </div>
+                      ) : (
+                        <>
+                          {selectedCustomer.email && <p className="text-xs text-gray-500">{selectedCustomer.email}</p>}
+                          {selectedCustomer.phoneNumber && <p className="text-xs text-gray-500">{selectedCustomer.phoneNumber}</p>}
+                        </>
+                      )}
+                      {!selectedCustomer.shopAddress && !selectedCustomer.email && (
                         <p className="text-xs text-amber-600 flex items-center gap-1">
                           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
                           </svg>
-                          No email - Save &amp; Email won't work
+                          Missing shop address and email
                         </p>
                       )}
                     </div>

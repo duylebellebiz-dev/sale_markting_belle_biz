@@ -66,6 +66,14 @@ function fmtDate(d?: string | Date | null): string {
  * JavaScript numbers so the PDF renderer never touches Decimal instances.
  * Also maps `termsConditions` → `terms_conditions` for the footer.
  */
+function addressLines(address?: string | null): string[] {
+  if (!address?.trim()) return [];
+  return address
+    .split(/\r?\n|,\s*/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
 function toPlain(inv: any): any {
   return {
     ...inv,
@@ -253,19 +261,16 @@ export class InvoicePdfService {
     let ly = y0;
 
     const billTo = inv.billTo as any ?? {};
-    const cName  = billTo.name || '—';
+    const billToAddress = billTo.addressLine || inv.customer?.shopAddress || '';
+    const cName = billTo.name || inv.customer?.shopName || inv.customer?.customerName || '-';
 
     doc.font('Helvetica-Bold').fontSize(11).fillColor(G900)
        .text(cName, ML, ly, { width: leftW });
     doc.font('Helvetica-Bold').fontSize(11);
     ly += doc.heightOfString(cName, { width: leftW }) + 3;
 
-    if (billTo.addressLine) {
-      const parts = billTo.addressLine
-        .split(/,\s*/)
-        .map((s: string) => s.trim())
-        .filter(Boolean);
-
+    const parts = addressLines(billToAddress);
+    if (parts.length) {
       for (const part of parts) {
         doc.font('Helvetica').fontSize(9).fillColor(G700)
            .text(part, ML, ly, { width: leftW });
@@ -273,8 +278,10 @@ export class InvoicePdfService {
       }
     }
 
-    if (!billTo.addressLine) {
-      const contact = [billTo.email, billTo.phone].filter(Boolean).join('  |  ');
+    if (!parts.length) {
+      const contact = [billTo.email, billTo.phone, inv.customer?.email, inv.customer?.phoneNumber]
+        .filter(Boolean)
+        .join('  |  ');
       if (contact) {
         doc.font('Helvetica').fontSize(9).fillColor(G500)
            .text(contact, ML, ly, { width: leftW });
