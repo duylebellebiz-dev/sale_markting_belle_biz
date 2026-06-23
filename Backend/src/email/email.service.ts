@@ -32,17 +32,29 @@ interface BusinessSmtpConfig {
  */
 @Injectable()
 export class EmailService {
-  private readonly resend: Resend;
-  private readonly defaultFrom: string;
+  private readonly resend: Resend | null;
+  private readonly defaultFrom: string | null;
   private readonly logger = new Logger(EmailService.name);
 
   constructor(
     private readonly config: ConfigService,
     private readonly prisma: PrismaService,
   ) {
-    const apiKey = this.config.getOrThrow<string>('RESEND_API_KEY');
-    this.defaultFrom = this.config.getOrThrow<string>('EMAIL_FROM');
-    this.resend = new Resend(apiKey);
+    const apiKey = this.config.get<string>('RESEND_API_KEY')?.trim() ?? '';
+    const emailFrom = this.config.get<string>('EMAIL_FROM')?.trim() ?? '';
+
+    this.defaultFrom = emailFrom || null;
+    this.resend = apiKey ? new Resend(apiKey) : null;
+
+    if (!this.resend) {
+      this.logger.warn(
+        'RESEND_API_KEY is not configured. Email sends require business SMTP settings or a fallback provider.',
+      );
+    } else if (!this.defaultFrom) {
+      this.logger.warn(
+        'EMAIL_FROM is not configured. Resend fallback is disabled until EMAIL_FROM is set.',
+      );
+    }
   }
 
   async send(options: SendEmailOptions): Promise<string> {
@@ -102,6 +114,12 @@ export class EmailService {
   }
 
   private async sendViaResend(options: SendEmailOptions): Promise<string> {
+    if (!this.resend || !this.defaultFrom) {
+      throw new Error(
+        'No email provider configured. Configure business SMTP settings or set RESEND_API_KEY and EMAIL_FROM.',
+      );
+    }
+
     const { data, error } = await this.resend.emails.send({
       from: this.defaultFrom,
       to: Array.isArray(options.to) ? options.to : [options.to],
