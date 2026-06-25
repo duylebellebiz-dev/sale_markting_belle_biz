@@ -48,6 +48,19 @@ enum NotificationType {
   renewal
 }
 
+enum FollowUpHistoryType {
+  scheduled
+  reminder_sent
+  closed_lost
+  closed_won
+}
+
+enum InvoiceActivityType {
+  sent
+  emailed
+  reminder
+}
+
 enum EmailTemplateType {
   welcome
   followup
@@ -113,6 +126,9 @@ model Business {
   province            String   @default("")   // 2-letter Canadian province code
   defaultCustomerNote String   @default("")
   defaultTerms        String   @default("")
+  invoiceNumberPrefix String   @default("INV-")
+  invoiceNumberPadding Int     @default(3)
+  invoiceNumberCurrentValue Int @default(0)
 
   // Encrypted Claude API key for AI analysis (§12c.1). AES-256-GCM, never returned to frontend.
   claudeApiKey        String   @default("")
@@ -152,6 +168,8 @@ model Business {
   campaignSearchTerms CampaignSearchTerm[]
   campaignTargetings  CampaignTargeting[]
   campaignDemographics CampaignDemographic[]
+  followUpHistory     FollowUpHistory[]
+  invoiceActivities   InvoiceActivity[]
 }
 
 // Salesperson / owner staff account (§4 / §5)
@@ -210,6 +228,7 @@ model Customer {
   invoices      Invoice[]
   subscriptions Subscription[]
   emailLogs     EmailLog[]
+  followUpHistory FollowUpHistory[]
 
   @@index([businessId])
   @@index([assignedToId])
@@ -266,7 +285,9 @@ model Invoice {
   attachments     Json          @default("[]") // [{ filename, path, mimeType, size }]
 
   status              InvoiceStatus @default(Draft)
+  dateSent            DateTime?
   nextReminderAt      DateTime?
+  lastReminderAt      DateTime?
   reminderStep        Int           @default(0)
   promisedPaymentDate DateTime?
 
@@ -278,12 +299,33 @@ model Invoice {
   lineItems     InvoiceLineItem[]
   payments      Payment[]
   subscriptions Subscription[]
+  activities    InvoiceActivity[]
 
   @@unique([businessId, invoiceNumber])
   @@index([businessId])
   @@index([customerId])
   @@index([businessId, status])
   @@index([nextReminderAt])
+  @@index([dateSent])
+}
+
+model FollowUpHistory {
+  id                String              @id @default(cuid())
+  businessId        String
+  customerId        String
+  actorUserId       String?
+  type              FollowUpHistoryType
+  note              String              @default("")
+  nextFollowUpAt    DateTime?
+  reminderTriggeredAt DateTime?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([businessId])
+  @@index([customerId, createdAt])
 }
 
 // Normalized line items — child table instead of embedded array (§5 / CLAUDE.md rule)
@@ -320,6 +362,24 @@ model Payment {
   invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
 
   @@index([invoiceId])
+}
+
+model InvoiceActivity {
+  id               String              @id @default(cuid())
+  businessId       String
+  invoiceId        String
+  actorUserId      String?
+  type             InvoiceActivityType
+  note             String              @default("")
+  balanceSnapshot  Decimal?            @db.Decimal(12, 2)
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  invoice  Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([businessId])
+  @@index([invoiceId, createdAt])
 }
 
 // Closed deal / active service subscription (§5 / §7.3)

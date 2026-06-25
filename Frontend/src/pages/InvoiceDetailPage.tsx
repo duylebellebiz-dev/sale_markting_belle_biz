@@ -4,6 +4,7 @@ import AppShell from '../components/AppShell';
 import InvoiceStatusBadge from '../features/invoices/InvoiceStatusBadge';
 import SendInvoiceEmailModal from '../features/invoices/SendInvoiceEmailModal';
 import { invoicesApi } from '../features/invoices/invoicesApi';
+import AddressBlock from '../features/invoices/AddressBlock';
 import type { Invoice } from '../features/invoices/invoicesApi';
 import { usePermission } from '../features/staff/usePermission';
 
@@ -16,6 +17,24 @@ function money(n: number) {
 function fmtDate(iso?: string) {
   if (!iso) return '-';
   return new Date(iso).toLocaleDateString(undefined, { dateStyle: 'medium' });
+}
+
+function fmtDateTime(iso?: string) {
+  if (!iso) return '-';
+  return new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+function invoiceActivityLabel(type: 'sent' | 'emailed' | 'reminder') {
+  switch (type) {
+    case 'sent':
+      return 'Marked Sent';
+    case 'emailed':
+      return 'Invoice Emailed';
+    case 'reminder':
+      return 'Reminder Sent';
+    default:
+      return type;
+  }
 }
 
 //  Sub-components 
@@ -452,16 +471,18 @@ export default function InvoiceDetailPage() {
           {/* Bill To */}
           <section className="rounded-xl border border-gray-200 bg-white shadow-sm p-5">
             <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Bill To</h3>
-            <p className="font-semibold text-gray-900">{invoice.billTo?.name || '-'}</p>
-            {invoice.billTo?.addressLine && (
-              <p className="text-sm text-gray-600 mt-1 whitespace-pre-line">{invoice.billTo.addressLine}</p>
-            )}
-            {!invoice.billTo?.addressLine && invoice.billTo?.email && (
-              <p className="text-sm text-gray-500 mt-1">{invoice.billTo.email}</p>
-            )}
-            {!invoice.billTo?.addressLine && invoice.billTo?.phone && (
-              <p className="text-sm text-gray-500">{invoice.billTo.phone}</p>
-            )}
+            <AddressBlock
+              name={invoice.billTo?.name || '-'}
+              address={invoice.billTo?.addressLine}
+              nameClassName="text-lg font-bold text-gray-900 leading-tight"
+              lineClassName="text-sm text-gray-500 leading-6"
+              emptyFallback={
+                <>
+                  {invoice.billTo?.email && <p className="text-sm text-gray-500 mt-1.5">{invoice.billTo.email}</p>}
+                  {invoice.billTo?.phone && <p className="text-sm text-gray-500">{invoice.billTo.phone}</p>}
+                </>
+              }
+            />
           </section>
 
           {/* Invoice meta */}
@@ -471,6 +492,8 @@ export default function InvoiceDetailPage() {
             <MetaRow label="Due Date" value={fmtDate(invoice.dueDate)} />
             <MetaRow label="Terms" value={invoice.terms || '-'} />
             {invoice.province && <MetaRow label="Province" value={invoice.province} />}
+            {invoice.dateSent && <MetaRow label="Date Sent" value={fmtDateTime(invoice.dateSent)} />}
+            {invoice.lastReminderAt && <MetaRow label="Last Reminder" value={fmtDateTime(invoice.lastReminderAt)} />}
             {invoice.nextReminderAt && !isPaid && !isCancelled && (
               <MetaRow
                 label="Next Reminder"
@@ -578,6 +601,34 @@ export default function InvoiceDetailPage() {
                 <p className="text-sm text-gray-500 whitespace-pre-line">{invoice.termsConditions}</p>
               </div>
             )}
+          </section>
+        )}
+
+        {(invoice.activities?.length ?? 0) > 0 && (
+          <section className="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
+            <div className="px-5 py-3 border-b border-gray-100 bg-gray-50">
+              <h3 className="text-sm font-semibold text-gray-700">Invoice Activity</h3>
+            </div>
+            <div className="divide-y divide-gray-100">
+              {invoice.activities?.map((activity) => (
+                <div key={activity.id} className="px-5 py-3 flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-sm font-medium text-gray-800">
+                      {invoiceActivityLabel(activity.type)}
+                    </p>
+                    {activity.note && <p className="text-sm text-gray-500 mt-0.5">{activity.note}</p>}
+                    {activity.balanceSnapshot != null && (
+                      <p className="text-xs text-gray-400 mt-1">
+                        Balance snapshot: ${money(activity.balanceSnapshot)}
+                      </p>
+                    )}
+                  </div>
+                  <span className="text-xs text-gray-400 whitespace-nowrap">
+                    {fmtDateTime(activity.createdAt)}
+                  </span>
+                </div>
+              ))}
+            </div>
           </section>
         )}
 

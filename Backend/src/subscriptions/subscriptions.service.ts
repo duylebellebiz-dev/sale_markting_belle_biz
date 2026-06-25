@@ -3,7 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { PipelineStage, Prisma, SubscriptionStatus } from '@prisma/client';
+import { FollowUpHistoryType, PipelineStage, Prisma, SubscriptionStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateSubscriptionDto } from './dto/create-subscription.dto';
 import { RenewSubscriptionDto } from './dto/renew-subscription.dto';
@@ -88,6 +88,16 @@ export class SubscriptionsService {
       await tx.customer.update({
         where: { id: customer.id },
         data: { isClosed: true, stage: PipelineStage.ClosedWon },
+      });
+
+      await tx.followUpHistory.create({
+        data: {
+          businessId: user.businessId,
+          customerId: customer.id,
+          actorUserId: user.userId,
+          type: FollowUpHistoryType.closed_won,
+          note: dto.note ?? '',
+        },
       });
 
       return sub;

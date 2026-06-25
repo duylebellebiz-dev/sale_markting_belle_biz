@@ -46,6 +46,7 @@ export default function BrandingPage() {
   const [defaultTaxRate,      setDefaultTaxRate]      = useState('');
   const [defaultCustomerNote, setDefaultCustomerNote] = useState('');
   const [defaultTerms,        setDefaultTerms]        = useState('');
+  const [currentInvoiceNumber, setCurrentInvoiceNumber] = useState('');
 
   const [saving,   setSaving]   = useState(false);
   const [saveMsg,  setSaveMsg]  = useState<string | null>(null);
@@ -75,6 +76,7 @@ export default function BrandingPage() {
         setDefaultTaxRate(b.defaultTaxRate != null ? String(b.defaultTaxRate) : '');
         setDefaultCustomerNote(b.defaultCustomerNote ?? '');
         setDefaultTerms(b.defaultTerms ?? '');
+        setCurrentInvoiceNumber(b.currentInvoiceNumber ?? '');
       })
       .catch(() => setLoadErr('Failed to load branding settings. Please refresh.'));
   }, []);
@@ -149,6 +151,7 @@ export default function BrandingPage() {
       defaultTaxRate:      defaultTaxRate ? taxRate : 0,
       defaultCustomerNote: defaultCustomerNote.trim() || undefined,
       defaultTerms:        defaultTerms.trim()        || undefined,
+      currentInvoiceNumber: currentInvoiceNumber.trim() || undefined,
     };
 
     setSaving(true);
@@ -364,6 +367,18 @@ export default function BrandingPage() {
             <p className="text-xs text-gray-500 -mt-2">
               Pre-fill the customer note and terms on every new invoice. The user can still edit them per invoice.
             </p>
+
+            <Field
+              label="Current Invoice Number"
+              hint="Enter your latest existing invoice number once, for example HR0002345. The next invoice will auto-generate as HR0002346."
+            >
+              <input
+                value={currentInvoiceNumber}
+                onChange={(e) => setCurrentInvoiceNumber(e.target.value)}
+                className={`${INPUT} max-w-sm`}
+                placeholder="HR0002345"
+              />
+            </Field>
 
             <Field label="Default Customer Note">
               <textarea

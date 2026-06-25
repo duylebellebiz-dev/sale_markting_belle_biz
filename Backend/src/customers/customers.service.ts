@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { PipelineStage, Prisma } from '@prisma/client';
+import { FollowUpHistoryType, PipelineStage, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
@@ -16,6 +16,8 @@ import type { RequestUser } from '../common/decorators/current-user.decorator';
 const WITH_ASSIGNEE = {
   assignedTo: { select: { id: true, fullName: true, email: true } },
 } satisfies Prisma.CustomerInclude;
+
+type DbClient = PrismaService | Prisma.TransactionClient;
 
 @Injectable()
 export class CustomersService {
@@ -36,28 +38,69 @@ export class CustomersService {
     return base;
   }
 
+  private async createFollowUpHistory(
+    db: DbClient,
+    params: {
+      businessId: string;
+      customerId: string;
+      actorUserId?: string | null;
+      type: FollowUpHistoryType;
+      note?: string;
+      nextFollowUpAt?: Date | null;
+      reminderTriggeredAt?: Date | null;
+    },
+  ) {
+    await db.followUpHistory.create({
+      data: {
+        businessId: params.businessId,
+        customerId: params.customerId,
+        actorUserId: params.actorUserId ?? null,
+        type: params.type,
+        note: params.note ?? '',
+        nextFollowUpAt: params.nextFollowUpAt ?? null,
+        reminderTriggeredAt: params.reminderTriggeredAt ?? null,
+      },
+    });
+  }
+
   async create(user: RequestUser, dto: CreateCustomerDto) {
     const assignedToId =
       user.role === 'owner' && dto.assignedTo ? dto.assignedTo : user.userId;
+    const nextFollowUpAt = dto.nextFollowUpAt ? new Date(dto.nextFollowUpAt) : null;
 
-    return this.prisma.customer.create({
-      data: {
-        businessId: user.businessId,
-        assignedToId,
-        customerName: dto.customerName ?? '',
-        shopName: dto.shopName ?? '',
-        shopAddress: dto.shopAddress ?? '',
-        email: dto.email ?? '',
-        phoneNumber: dto.phoneNumber ?? '',
-        shopPhoneNumber: dto.shopPhoneNumber ?? '',
-        contactSource: dto.contactSource ?? '',
-        dateOfContact: dto.dateOfContact ? new Date(dto.dateOfContact) : undefined,
-        stage: dto.stage,
-        status: dto.status ?? '',
-        note: dto.note ?? '',
-        nextFollowUpAt: dto.nextFollowUpAt ? new Date(dto.nextFollowUpAt) : undefined,
-      },
-      include: WITH_ASSIGNEE,
+    return this.prisma.$transaction(async (tx) => {
+      const customer = await tx.customer.create({
+        data: {
+          businessId: user.businessId,
+          assignedToId,
+          customerName: dto.customerName ?? '',
+          shopName: dto.shopName ?? '',
+          shopAddress: dto.shopAddress ?? '',
+          email: dto.email ?? '',
+          phoneNumber: dto.phoneNumber ?? '',
+          shopPhoneNumber: dto.shopPhoneNumber ?? '',
+          contactSource: dto.contactSource ?? '',
+          dateOfContact: dto.dateOfContact ? new Date(dto.dateOfContact) : undefined,
+          stage: dto.stage,
+          status: dto.status ?? '',
+          note: dto.note ?? '',
+          nextFollowUpAt,
+        },
+        include: WITH_ASSIGNEE,
+      });
+
+      if (nextFollowUpAt || dto.note?.trim()) {
+        await this.createFollowUpHistory(tx, {
+          businessId: user.businessId,
+          customerId: customer.id,
+          actorUserId: user.userId,
+          type: FollowUpHistoryType.scheduled,
+          note: dto.note,
+          nextFollowUpAt,
+        });
+      }
+
+      return customer;
     });
   }
 
@@ -154,13 +197,27 @@ export class CustomersService {
     if (!existing) throw new NotFoundException('Customer not found');
     if (existing.isClosed) throw new BadRequestException('Customer is already closed');
 
-    return this.prisma.customer.update({
-      where: { id },
-      data: {
-        nextFollowUpAt: new Date(dto.nextFollowUpAt),
-        ...(dto.note !== undefined && { note: dto.note }),
-      },
-      include: WITH_ASSIGNEE,
+    return this.prisma.$transaction(async (tx) => {
+      const nextFollowUpAt = new Date(dto.nextFollowUpAt);
+      const customer = await tx.customer.update({
+        where: { id },
+        data: {
+          nextFollowUpAt,
+          ...(dto.note !== undefined && { note: dto.note }),
+        },
+        include: WITH_ASSIGNEE,
+      });
+
+      await this.createFollowUpHistory(tx, {
+        businessId: user.businessId,
+        customerId: id,
+        actorUserId: user.userId,
+        type: FollowUpHistoryType.scheduled,
+        note: dto.note,
+        nextFollowUpAt,
+      });
+
+      return customer;
     });
   }
 
@@ -172,15 +229,41 @@ export class CustomersService {
     if (!existing) throw new NotFoundException('Customer not found');
     if (existing.isClosed) throw new BadRequestException('Customer is already closed');
 
-    return this.prisma.customer.update({
-      where: { id },
-      data: {
-        isClosed: true,
-        stage: PipelineStage.ClosedLost,
-        nextFollowUpAt: null,
-        ...(dto.note !== undefined && { note: dto.note }),
-      },
-      include: WITH_ASSIGNEE,
+    return this.prisma.$transaction(async (tx) => {
+      const customer = await tx.customer.update({
+        where: { id },
+        data: {
+          isClosed: true,
+          stage: PipelineStage.ClosedLost,
+          nextFollowUpAt: null,
+          ...(dto.note !== undefined && { note: dto.note }),
+        },
+        include: WITH_ASSIGNEE,
+      });
+
+      await this.createFollowUpHistory(tx, {
+        businessId: user.businessId,
+        customerId: id,
+        actorUserId: user.userId,
+        type: FollowUpHistoryType.closed_lost,
+        note: dto.note,
+      });
+
+      return customer;
+    });
+  }
+
+  async getFollowUpHistory(user: RequestUser, id: string) {
+    const existing = await this.prisma.customer.findFirst({
+      where: { id, ...this.scopeWhere(user) },
+      select: { id: true },
+    });
+    if (!existing) throw new NotFoundException('Customer not found');
+
+    return this.prisma.followUpHistory.findMany({
+      where: { customerId: id, businessId: user.businessId },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
     });
   }
 
@@ -199,14 +282,37 @@ export class CustomersService {
         businessId: true,
         assignedToId: true,
         customerName: true,
+        note: true,
+        nextFollowUpAt: true,
       },
     });
   }
 
-  clearFollowUpDate(customerId: string) {
-    return this.prisma.customer.update({
+  async clearFollowUpDate(customerId: string) {
+    const customer = await this.prisma.customer.findUnique({
       where: { id: customerId },
-      data: { nextFollowUpAt: null },
+      select: {
+        id: true,
+        businessId: true,
+        note: true,
+        nextFollowUpAt: true,
+      },
+    });
+    if (!customer) return null;
+
+    return this.prisma.$transaction(async (tx) => {
+      await this.createFollowUpHistory(tx, {
+        businessId: customer.businessId,
+        customerId: customer.id,
+        type: FollowUpHistoryType.reminder_sent,
+        note: customer.note,
+        nextFollowUpAt: customer.nextFollowUpAt,
+        reminderTriggeredAt: new Date(),
+      });
+      return tx.customer.update({
+        where: { id: customerId },
+        data: { nextFollowUpAt: null },
+      });
     });
   }
 }

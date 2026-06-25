@@ -44,6 +44,11 @@ export class CustomersController {
     return this.customersService.search(user, q, limit ? parseInt(limit, 10) : 20);
   }
 
+  @Get(':id/follow-up-history')
+  getFollowUpHistory(@CurrentUser() user: RequestUser, @Param('id') id: string) {
+    return this.customersService.getFollowUpHistory(user, id);
+  }
+
   @Get(':id')
   findOne(@CurrentUser() user: RequestUser, @Param('id') id: string) {
     return this.customersService.findOne(user, id);

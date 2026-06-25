@@ -33,6 +33,15 @@ export interface Customer {
   updatedAt: string;
 }
 
+export interface FollowUpHistoryEntry {
+  id: string;
+  type: 'scheduled' | 'reminder_sent' | 'closed_lost' | 'closed_won';
+  note?: string;
+  nextFollowUpAt?: string | null;
+  reminderTriggeredAt?: string | null;
+  createdAt: string;
+}
+
 export interface CustomerPayload {
   customerName: string;
   assignedTo?: string;
@@ -77,6 +86,9 @@ export const customersApi = {
 
   closeLost: (id: string, note?: string) =>
     api.post<Customer>(`/customers/${id}/close-lost`, { note }).then(d<Customer>),
+
+  followUpHistory: (id: string) =>
+    api.get<FollowUpHistoryEntry[]>(`/customers/${id}/follow-up-history`).then(d<FollowUpHistoryEntry[]>),
 
   listStaff: () => api.get<StaffUser[]>('/users').then(d<StaffUser[]>),
 

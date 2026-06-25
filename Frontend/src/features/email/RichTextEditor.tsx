@@ -1,7 +1,5 @@
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
-import Underline from '@tiptap/extension-underline';
-import Link from '@tiptap/extension-link';
 import Image from '@tiptap/extension-image';
 import { useCallback, useEffect } from 'react';
 import VariablePicker from './VariablePicker';
@@ -74,11 +72,11 @@ export default function RichTextEditor({ value, onChange, placeholder }: Props) 
         // StarterKit includes bold, italic, strike, code, heading, bulletList,
         // orderedList, blockquote, horizontalRule, hardBreak, history, etc.
         heading: { levels: [1, 2] },
-      }),
-      Underline,
-      Link.configure({
-        openOnClick: false,
-        HTMLAttributes: { rel: 'noopener noreferrer' },
+        link: {
+          openOnClick: false,
+          HTMLAttributes: { rel: 'noopener noreferrer' },
+        },
+        underline: {},
       }),
       Image.configure({ inline: true, allowBase64: true }),
     ],

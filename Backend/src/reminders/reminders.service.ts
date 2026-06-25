@@ -136,7 +136,13 @@ export class RemindersService {
           relatedId: inv.id,
         });
 
-        await this.invoicesService.advanceInvoiceReminder(inv.id, schedule);
+        await this.invoicesService.advanceInvoiceReminder(
+          inv.id,
+          schedule,
+          isPromised
+            ? 'Promised payment date reminder triggered.'
+            : 'Scheduled invoice reminder triggered.',
+        );
 
         notified++;
       } catch (err) {

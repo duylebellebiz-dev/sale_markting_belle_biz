@@ -34,6 +34,50 @@ const G400  = '#9CA3AF';
 const G300  = '#D1D5DB';
 const G200  = '#E5E7EB';
 const G100  = '#F3F4F6';
+const PROVINCE_ALIASES: Record<string, string> = {
+  AB: 'AB',
+  ALBERTA: 'AB',
+  BC: 'BC',
+  'BRITISH COLUMBIA': 'BC',
+  MB: 'MB',
+  MANITOBA: 'MB',
+  NB: 'NB',
+  'NEW BRUNSWICK': 'NB',
+  NL: 'NL',
+  'NEWFOUNDLAND AND LABRADOR': 'NL',
+  NS: 'NS',
+  'NOVA SCOTIA': 'NS',
+  NT: 'NT',
+  'NORTHWEST TERRITORIES': 'NT',
+  NU: 'NU',
+  NUNAVUT: 'NU',
+  ON: 'ON',
+  ONTARIO: 'ON',
+  PE: 'PE',
+  'PRINCE EDWARD ISLAND': 'PE',
+  QC: 'QC',
+  QUEBEC: 'QC',
+  SK: 'SK',
+  SASKATCHEWAN: 'SK',
+  YT: 'YT',
+  YUKON: 'YT',
+};
+const PROVINCE_PATTERN = new RegExp(
+  `\\b(${Object.keys(PROVINCE_ALIASES)
+    .sort((a, b) => b.length - a.length)
+    .map((value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('|')})\\b`,
+  'i',
+);
+const POSTAL_CODE_PATTERN = /\b([A-Z]\d[A-Z])\s?(\d[A-Z]\d)\b/i;
+const COUNTRY_PATTERN = /\b(Canada|United States|USA|US)\b$/i;
+const STREET_SUFFIXES = new Set([
+  'AVE', 'AVENUE', 'BLVD', 'BOULEVARD', 'CIR', 'CIRCLE', 'CLOSE', 'COURT', 'CRT',
+  'CRES', 'CRESCENT', 'DR', 'DRIVE', 'GATE', 'GDNS', 'GROVE', 'HWY', 'HIGHWAY',
+  'LANE', 'LN', 'PATH', 'PKWY', 'PLACE', 'PL', 'RD', 'ROAD', 'SQ', 'ST', 'STREET',
+  'TERR', 'TERRACE', 'TRAIL', 'VIEW', 'WAY',
+]);
+const UNIT_MARKERS = new Set(['#', 'APT', 'APARTMENT', 'BAY', 'BUILDING', 'FL', 'FLOOR', 'RM', 'ROOM', 'STE', 'SUITE', 'UNIT']);
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -66,12 +110,155 @@ function fmtDate(d?: string | Date | null): string {
  * JavaScript numbers so the PDF renderer never touches Decimal instances.
  * Also maps `termsConditions` → `terms_conditions` for the footer.
  */
-function addressLines(address?: string | null): string[] {
-  if (!address?.trim()) return [];
-  return address
+function cleanWhitespace(value: string) {
+  return value.replace(/\s+/g, ' ').trim();
+}
+
+function normalizeCountry(country?: string | null) {
+  if (!country) return undefined;
+  const value = cleanWhitespace(country);
+  if (!value) return undefined;
+  if (/^(usa|us)$/i.test(value)) return 'USA';
+  return value;
+}
+
+function normalizeProvince(province?: string | null) {
+  if (!province) return undefined;
+  const key = cleanWhitespace(province).toUpperCase();
+  return PROVINCE_ALIASES[key] ?? key;
+}
+
+function splitStreetAndCity(prefix: string) {
+  const tokens = cleanWhitespace(prefix).split(' ').filter(Boolean);
+  let boundary = -1;
+
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = tokens[i].replace(/[.,]/g, '').toUpperCase();
+    if (STREET_SUFFIXES.has(token)) {
+      boundary = i;
+      continue;
+    }
+    if (UNIT_MARKERS.has(token)) {
+      boundary = Math.min(i + 1, tokens.length - 1);
+      continue;
+    }
+    if (/^#\w+/i.test(tokens[i])) {
+      boundary = i;
+    }
+  }
+
+  if (boundary >= 0 && boundary < tokens.length - 1) {
+    return {
+      line1: tokens.slice(0, boundary + 1).join(' '),
+      city: tokens.slice(boundary + 1).join(' '),
+    };
+  }
+
+  return { line1: prefix, city: '' };
+}
+
+function fallbackAddressLines(address?: string | null, country?: string) {
+  const lines = (address ?? '')
     .split(/\r?\n|,\s*/)
-    .map((part) => part.trim())
+    .map((part) => cleanWhitespace(part))
     .filter(Boolean);
+  const normalizedCountry = normalizeCountry(country);
+  if (normalizedCountry && !lines.some((line) => line.toLowerCase() === normalizedCountry.toLowerCase())) {
+    lines.push(normalizedCountry);
+  }
+  return lines;
+}
+
+function addressLines(address?: string | null, province?: string | null, country?: string | null): string[] {
+  const normalizedCountry = normalizeCountry(country);
+  const normalizedProvince = normalizeProvince(province);
+  const raw = cleanWhitespace((address ?? '').replace(/\r?\n/g, ', '));
+
+  if (!raw) {
+    return normalizedCountry ? [normalizedCountry] : [];
+  }
+
+  let working = raw;
+  let detectedCountry = normalizedCountry;
+  const countryMatch = working.match(COUNTRY_PATTERN);
+  if (countryMatch) {
+    detectedCountry = normalizeCountry(countryMatch[1]) ?? detectedCountry;
+    working = cleanWhitespace(working.slice(0, countryMatch.index));
+  }
+
+  const postalMatch = working.match(POSTAL_CODE_PATTERN);
+  const postalCode = postalMatch ? `${postalMatch[1].toUpperCase()} ${postalMatch[2].toUpperCase()}` : undefined;
+
+  const provinceMatches = [...working.matchAll(new RegExp(PROVINCE_PATTERN.source, 'gi'))];
+  const provinceMatch = provinceMatches.length ? provinceMatches[provinceMatches.length - 1] : undefined;
+  const parsedProvince = provinceMatch ? normalizeProvince(provinceMatch[1]) : normalizedProvince;
+
+  if (!postalCode || !parsedProvince) {
+    return fallbackAddressLines(raw, detectedCountry);
+  }
+
+  const postalStart = postalMatch?.index ?? -1;
+  const provinceStart = provinceMatch?.index ?? -1;
+  const provinceEnd = provinceStart >= 0 && provinceMatch ? provinceStart + provinceMatch[0].length : -1;
+  const postalEnd = postalStart >= 0 && postalMatch ? postalStart + postalMatch[0].length : -1;
+
+  const headEnd = provinceStart >= 0 && provinceStart < postalStart ? provinceStart : postalStart;
+  const tailStart = provinceStart >= 0 && provinceStart > postalStart ? provinceEnd : postalEnd;
+
+  const prefix = cleanWhitespace(working.slice(0, headEnd));
+  const between = cleanWhitespace(working.slice(headEnd, tailStart).replace(PROVINCE_PATTERN, '').replace(POSTAL_CODE_PATTERN, ''));
+  const suffix = cleanWhitespace(working.slice(tailStart));
+  const localitySource = cleanWhitespace([between, suffix].filter(Boolean).join(' '));
+
+  const { line1, city } = splitStreetAndCity(prefix);
+  const localityCity = city || localitySource;
+  const line2Parts: string[] = [];
+  if (localityCity) line2Parts.push(localityCity);
+  line2Parts.push([parsedProvince, postalCode].filter(Boolean).join(' '));
+
+  const lines = [line1, line2Parts.join(', '), detectedCountry]
+    .map((line) => line?.trim())
+    .filter(Boolean) as string[];
+
+  return lines.length ? lines : fallbackAddressLines(raw, detectedCountry);
+}
+
+function invoiceTaxRegistrationLine(
+  biz: { gstNumber?: string | null; pstNumber?: string | null },
+  invoiceProvince?: string | null,
+): string {
+  const parts = [biz.gstNumber];
+  if (invoiceProvince === 'BC' && biz.pstNumber) {
+    parts.push(biz.pstNumber);
+  }
+  return parts.filter(Boolean).join('    ');
+}
+
+function compactDateForFilename(d?: string | Date | null): string {
+  if (!d) return '000000';
+  const dt = new Date(d as string);
+  if (Number.isNaN(dt.getTime())) return '000000';
+  const yy = String(dt.getFullYear()).slice(-2);
+  const mm = String(dt.getMonth() + 1).padStart(2, '0');
+  const dd = String(dt.getDate()).padStart(2, '0');
+  return `${yy}${mm}${dd}`;
+}
+
+function sanitizeFilenamePart(value?: string | null): string {
+  const cleaned = (value ?? '')
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return cleaned || 'Invoice';
+}
+
+function buildInvoicePdfFilename(inv: any): string {
+  const datePart = compactDateForFilename(inv.invoiceDate);
+  const invoicePart = sanitizeFilenamePart(inv.invoiceNumber || 'invoice');
+  const namePart = sanitizeFilenamePart(
+    inv.billTo?.name || inv.customer?.shopName || inv.customer?.customerName || 'Customer',
+  );
+  return `${datePart}-${invoicePart}-${namePart}.pdf`;
 }
 
 function toPlain(inv: any): any {
@@ -119,12 +306,13 @@ export class InvoicePdfService {
   async streamPdf(invoice: any, businessId: string, res: Response): Promise<void> {
     const biz = await this.loadBiz(businessId);
     const plain = toPlain(invoice);
+    const filename = buildInvoicePdfFilename(plain);
     const doc: PDFKit.PDFDocument = new PDFDocument({
       size: 'LETTER', margin: 0, autoFirstPage: true,
       info: { Title: `Invoice ${plain.invoiceNumber}` },
     });
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="invoice-${plain.invoiceNumber}.pdf"`);
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     doc.pipe(res);
     this.draw(doc, plain, biz);
     doc.end();
@@ -137,6 +325,7 @@ export class InvoicePdfService {
         businessName: true,
         logoUrl: true,
         addressLine: true,
+        province: true,
         country: true,
         phone: true,
         website: true,
@@ -216,32 +405,21 @@ export class InvoicePdfService {
       } catch { /* skip broken logo */ }
     }
 
-    let ly = logoBottom + (logoPath ? 8 : 0);
+    let ly = logoBottom + (logoPath ? 10 : 0);
 
     const bizNameW = invTitleX - ML - 12;
-    doc.font('Helvetica-Bold').fontSize(11).fillColor(G900)
+    doc.font('Helvetica-Bold').fontSize(16).fillColor(G900)
        .text(biz.businessName ?? '', ML, ly, { width: bizNameW });
-    doc.font('Helvetica-Bold').fontSize(11);
-    ly += doc.heightOfString(biz.businessName ?? '', { width: bizNameW }) + 3;
+    doc.font('Helvetica-Bold').fontSize(16);
+    ly += doc.heightOfString(biz.businessName ?? '', { width: bizNameW }) + 6;
 
-    if (biz.addressLine) {
-      doc.font('Helvetica').fontSize(9).fillColor(G500)
-         .text(biz.addressLine, ML, ly, { width: bizNameW });
-      doc.font('Helvetica').fontSize(9);
-      ly += doc.heightOfString(biz.addressLine, { width: bizNameW }) + 1;
-    }
-
-    if (biz.country) {
-      doc.font('Helvetica').fontSize(9).fillColor(G500)
-         .text(biz.country, ML, ly, { width: bizNameW });
-      ly += 12;
-    }
-
-    const contact = [biz.phone, biz.website].filter(Boolean).join('  |  ');
-    if (contact) {
-      doc.font('Helvetica').fontSize(9).fillColor(G500)
-         .text(contact, ML, ly, { width: bizNameW });
-      ly += 12;
+    const bizAddressLines = addressLines(biz.addressLine, biz.province, biz.country);
+    if (bizAddressLines.length) {
+      doc.font('Helvetica').fontSize(10).fillColor(G500);
+      for (const line of bizAddressLines) {
+        doc.text(line, ML, ly, { width: bizNameW });
+        ly += 15;
+      }
     }
 
     return Math.max(ly, rightBottom);
@@ -264,17 +442,17 @@ export class InvoicePdfService {
     const billToAddress = billTo.addressLine || inv.customer?.shopAddress || '';
     const cName = billTo.name || inv.customer?.shopName || inv.customer?.customerName || '-';
 
-    doc.font('Helvetica-Bold').fontSize(11).fillColor(G900)
+    doc.font('Helvetica-Bold').fontSize(16).fillColor(G900)
        .text(cName, ML, ly, { width: leftW });
-    doc.font('Helvetica-Bold').fontSize(11);
-    ly += doc.heightOfString(cName, { width: leftW }) + 3;
+    doc.font('Helvetica-Bold').fontSize(16);
+    ly += doc.heightOfString(cName, { width: leftW }) + 6;
 
     const parts = addressLines(billToAddress);
     if (parts.length) {
       for (const part of parts) {
-        doc.font('Helvetica').fontSize(9).fillColor(G700)
+        doc.font('Helvetica').fontSize(10).fillColor(G500)
            .text(part, ML, ly, { width: leftW });
-        ly += 13;
+        ly += 15;
       }
     }
 
@@ -451,7 +629,7 @@ export class InvoicePdfService {
       y += doc.heightOfString(inv.customerNote, { width: CW }) + 14;
     }
 
-    const taxLine = [biz.gstNumber, biz.pstNumber].filter(Boolean).join('    ');
+    const taxLine = invoiceTaxRegistrationLine(biz, inv.province);
     if (taxLine) {
       doc.font('Helvetica').fontSize(9).fillColor(G500)
          .text(taxLine, ML, y, { width: CW });

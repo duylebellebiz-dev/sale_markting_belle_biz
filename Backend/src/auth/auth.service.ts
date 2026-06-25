@@ -17,13 +17,19 @@ export class AuthService {
     private readonly jwtService: JwtService,
   ) {}
 
+  private normalizeEmail(email: string) {
+    return email.trim().toLowerCase();
+  }
+
   async register(dto: RegisterDto) {
     if (dto.password !== dto.confirmPassword) {
       throw new BadRequestException('Passwords do not match');
     }
 
+    const normalizedEmail = this.normalizeEmail(dto.email);
+
     const existing = await this.prisma.user.findUnique({
-      where: { email: dto.email.toLowerCase() },
+      where: { email: normalizedEmail },
     });
     if (existing) {
       throw new ConflictException('Email already registered');
@@ -34,7 +40,7 @@ export class AuthService {
     const business = await this.prisma.business.create({
       data: {
         businessName: dto.businessName,
-        email: dto.email.toLowerCase(),
+        email: normalizedEmail,
         passwordHash,
       },
     });
@@ -43,7 +49,7 @@ export class AuthService {
       data: {
         businessId: business.id,
         fullName: dto.businessName,
-        email: dto.email.toLowerCase(),
+        email: normalizedEmail,
         passwordHash,
         role: 'owner',
       },
@@ -53,16 +59,40 @@ export class AuthService {
   }
 
   async login(dto: LoginDto) {
-    const user = await this.prisma.user.findUnique({
-      where: { email: dto.email.toLowerCase() },
-    });
-    if (!user) {
-      throw new UnauthorizedException('Invalid credentials');
-    }
+    const normalizedEmail = this.normalizeEmail(dto.email);
 
-    const valid = await bcrypt.compare(dto.password, user.passwordHash);
-    if (!valid) {
-      throw new UnauthorizedException('Invalid credentials');
+    let user = await this.prisma.user.findUnique({
+      where: { email: normalizedEmail },
+    });
+
+    if (user) {
+      const valid = await bcrypt.compare(dto.password, user.passwordHash);
+      if (!valid) {
+        throw new UnauthorizedException('Invalid credentials');
+      }
+    } else {
+      // Backward compatibility: older owner accounts may exist only on Business.
+      const business = await this.prisma.business.findUnique({
+        where: { email: normalizedEmail },
+      });
+      if (!business) {
+        throw new UnauthorizedException('Invalid credentials');
+      }
+
+      const valid = await bcrypt.compare(dto.password, business.passwordHash);
+      if (!valid) {
+        throw new UnauthorizedException('Invalid credentials');
+      }
+
+      user = await this.prisma.user.create({
+        data: {
+          businessId: business.id,
+          fullName: business.businessName,
+          email: normalizedEmail,
+          passwordHash: business.passwordHash,
+          role: 'owner',
+        },
+      });
     }
 
     const payload = {

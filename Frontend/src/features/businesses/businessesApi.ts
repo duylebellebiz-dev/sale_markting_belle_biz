@@ -15,6 +15,7 @@ export interface BusinessBranding {
   defaultCustomerNote?: string;
   defaultTerms?: string;
   province?: string;
+  currentInvoiceNumber?: string;
 }
 
 export interface UpdateBrandingPayload {
@@ -29,6 +30,7 @@ export interface UpdateBrandingPayload {
   defaultCustomerNote?: string;
   defaultTerms?: string;
   province?: string;
+  currentInvoiceNumber?: string;
 }
 
 export interface SmtpSettings {

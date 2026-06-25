@@ -67,4 +67,9 @@ export class UpdateBrandingDto {
   @IsString()
   @MaxLength(10)
   province?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  currentInvoiceNumber?: string;
 }

@@ -26,6 +26,14 @@ export interface PaymentEntry {
   note?: string;
 }
 
+export interface InvoiceActivityEntry {
+  id: string;
+  type: 'sent' | 'emailed' | 'reminder';
+  note?: string;
+  balanceSnapshot?: number | null;
+  createdAt: string;
+}
+
 export interface InvoiceCustomer {
   id: string;
   customerName: string;
@@ -57,10 +65,13 @@ export interface Invoice {
   customerNote?: string;
   termsConditions?: string;
   status: InvoiceStatus;
+  dateSent?: string;
+  lastReminderAt?: string;
   nextReminderAt?: string;
   reminderStep: number;
   promisedPaymentDate?: string;
   payments: PaymentEntry[];
+  activities?: InvoiceActivityEntry[];
   createdAt: string;
   updatedAt: string;
 }
@@ -91,6 +102,7 @@ export interface CreateInvoicePayload {
 }
 
 export interface UpdateInvoicePayload {
+  customerId?: string;
   invoiceNumber?: string;
   invoiceDate?: string;
   dueDate?: string;
@@ -115,8 +127,62 @@ export interface AddPaymentPayload {
 
 const d = <T>(res: { data: T }) => res.data;
 
+async function errorMessageFromBlob(blob: Blob) {
+  const raw = await blob.text();
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as { message?: string | string[] };
+    const message = parsed?.message;
+    return Array.isArray(message) ? message.join(', ') : (message ?? raw);
+  } catch {
+    return raw;
+  }
+}
+
+async function errorMessageFromUnknown(err: unknown) {
+  const response = (err as {
+    response?: {
+      data?: unknown;
+    };
+    message?: string;
+  })?.response;
+
+  const message = (response?.data as { message?: string | string[] } | undefined)?.message;
+  if (Array.isArray(message)) return message.join(', ');
+  if (typeof message === 'string' && message.trim()) return message;
+
+  if (response?.data instanceof Blob) {
+    const blobMessage = await errorMessageFromBlob(response.data);
+    if (blobMessage?.trim()) return blobMessage;
+  }
+
+  return (err as { message?: string })?.message ?? 'Something went wrong.';
+}
+
+function filenameFromDisposition(value?: string) {
+  if (!value) return null;
+  const utf8Match = value.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utf8Match) return decodeURIComponent(utf8Match[1]);
+  const plainMatch = value.match(/filename="([^"]+)"/i) ?? value.match(/filename=([^;]+)/i);
+  return plainMatch?.[1]?.trim() ?? null;
+}
+
+function toInvoiceRequestPayload(
+  payload: CreateInvoicePayload | UpdateInvoicePayload,
+): Record<string, unknown> {
+  const { termsConditions, ...rest } = payload;
+  return {
+    ...rest,
+    ...(termsConditions !== undefined ? { terms_conditions: termsConditions } : {}),
+  };
+}
+
 export const invoicesApi = {
-  nextNumber: () => api.get<string>('/invoices/next-number').then(d<string>),
+  nextNumber: () =>
+    api
+      .get<string | number>('/invoices/next-number')
+      .then(d<string | number>)
+      .then((value) => String(value ?? '')),
 
   list: () => api.get<Invoice[]>('/invoices').then(d<Invoice[]>),
 
@@ -126,10 +192,10 @@ export const invoicesApi = {
   get: (id: string) => api.get<Invoice>(`/invoices/${id}`).then(d<Invoice>),
 
   create: (payload: CreateInvoicePayload) =>
-    api.post<Invoice>('/invoices', payload).then(d<Invoice>),
+    api.post<Invoice>('/invoices', toInvoiceRequestPayload(payload)).then(d<Invoice>),
 
   update: (id: string, payload: UpdateInvoicePayload) =>
-    api.patch<Invoice>(`/invoices/${id}`, payload).then(d<Invoice>),
+    api.patch<Invoice>(`/invoices/${id}`, toInvoiceRequestPayload(payload)).then(d<Invoice>),
 
   remove: (id: string) => api.delete(`/invoices/${id}`),
 
@@ -161,14 +227,20 @@ export const invoicesApi = {
     api.post<{ message: string }>(`/invoices/${id}/send-email`, payload).then(d<{ message: string }>),
 
   downloadPdf: async (id: string, invoiceNumber: string) => {
-    const res = await api.get<Blob>(`/invoices/${id}/pdf`, { responseType: 'blob' });
-    const url = URL.createObjectURL(res.data);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `invoice-${invoiceNumber}.pdf`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    try {
+      const res = await api.get<Blob>(`/invoices/${id}/pdf`, { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download =
+        filenameFromDisposition(res.headers?.['content-disposition']) ??
+        `invoice-${invoiceNumber}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      throw new Error(await errorMessageFromUnknown(err));
+    }
   },
 };

@@ -35,6 +35,9 @@ const LABEL = 'text-xs font-medium text-gray-600 uppercase tracking-wide';
 function uid() {
   return Math.random().toString(36).slice(2);
 }
+function asText(value: unknown) {
+  return typeof value === 'string' ? value : String(value ?? '');
+}
 
 function r2(n: number) {
   return Math.round(n * 100) / 100;
@@ -97,7 +100,7 @@ export default function InvoiceForm({ initial, onSubmit, onClose }: Props) {
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   //  Invoice header 
-  const [invoiceNumber, setInvoiceNumber] = useState(initial?.invoiceNumber ?? '');
+  const [invoiceNumber, setInvoiceNumber] = useState(asText(initial?.invoiceNumber));
   const [invoiceDate, setInvoiceDate] = useState(toDateInput(initial?.invoiceDate));
   const [dueDate, setDueDate] = useState(toDateInput(initial?.dueDate));
   const [terms, setTerms] = useState(initial?.terms ?? '');
@@ -153,7 +156,7 @@ export default function InvoiceForm({ initial, onSubmit, onClose }: Props) {
       }).catch(() => null);
 
       invoicesApi.nextNumber().then((n) => {
-        setInvoiceNumber(n as unknown as string);
+        setInvoiceNumber(asText(n));
       }).catch(() => null);
     }
   }, []);
@@ -212,7 +215,8 @@ export default function InvoiceForm({ initial, onSubmit, onClose }: Props) {
     setError(null);
 
     if (!initial && !customerId) { setError('Please select a customer.'); return; }
-    if (!invoiceNumber.trim()) { setError('Invoice number is required.'); return; }
+    const normalizedInvoiceNumber = asText(invoiceNumber).trim();
+    if (!normalizedInvoiceNumber) { setError('Invoice number is required.'); return; }
 
     for (const row of rows) {
       if (!row.description.trim()) { setError('Each line item must have a description.'); return; }
@@ -231,7 +235,7 @@ export default function InvoiceForm({ initial, onSubmit, onClose }: Props) {
 
     const payload: CreateInvoicePayload = {
       customerId,
-      invoiceNumber: invoiceNumber.trim(),
+      invoiceNumber: normalizedInvoiceNumber,
       invoiceDate: invoiceDate || undefined,
       dueDate: dueDate || undefined,
       terms: terms.trim() || undefined,
@@ -331,7 +335,7 @@ export default function InvoiceForm({ initial, onSubmit, onClose }: Props) {
             <div className="flex flex-col gap-1 sm:col-span-2">
               <label className={LABEL}>Invoice # *</label>
               <input
-                value={invoiceNumber}
+                value={asText(invoiceNumber)}
                 onChange={(e) => setInvoiceNumber(e.target.value)}
                 className={INPUT}
                 placeholder="INV-001"

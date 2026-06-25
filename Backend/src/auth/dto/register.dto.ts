@@ -1,3 +1,4 @@
+import { Transform } from 'class-transformer';
 import { IsEmail, IsString, MinLength, MaxLength } from 'class-validator';
 
 export class RegisterDto {
@@ -6,6 +7,7 @@ export class RegisterDto {
   @MaxLength(100)
   businessName: string;
 
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsEmail()
   email: string;
 

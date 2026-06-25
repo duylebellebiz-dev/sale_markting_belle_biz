@@ -43,7 +43,7 @@ export class InvoicesController {
   // Static sub-paths must come before :id to avoid route conflicts
   @Get('next-number')
   nextNumber(@CurrentUser() user: RequestUser) {
-    return this.invoicesService.nextInvoiceNumber(user.businessId);
+    return this.invoicesService.previewNextInvoiceNumber(user.businessId);
   }
 
   @Get('by-customer/:customerId')

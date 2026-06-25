@@ -21,6 +21,9 @@ const BRANDING_SELECT = {
   province: true,
   defaultCustomerNote: true,
   defaultTerms: true,
+  invoiceNumberPrefix: true,
+  invoiceNumberPadding: true,
+  invoiceNumberCurrentValue: true,
   createdAt: true,
   updatedAt: true,
 } as const;
@@ -30,9 +33,49 @@ interface ReminderSchedule {
   renewalReminderDays: number[];
 }
 
+function formatInvoiceNumber(prefix: string, value: number, padding: number) {
+  return `${prefix}${String(Math.max(value, 0)).padStart(Math.max(padding, 1), '0')}`;
+}
+
+function parseInvoiceNumberSeed(raw?: string) {
+  const value = raw?.trim();
+  if (!value) return null;
+  const match = value.match(/^(.*?)(\d+)$/);
+  if (!match) {
+    throw new UnprocessableEntityException(
+      'Current invoice number must end with digits, for example HR0002345.',
+    );
+  }
+  return {
+    prefix: match[1],
+    padding: match[2].length,
+    currentValue: parseInt(match[2], 10),
+  };
+}
+
 @Injectable()
 export class BusinessesService {
   constructor(private readonly prisma: PrismaService) {}
+
+  private mapBranding<T extends Record<string, unknown>>(business: T) {
+    const currentValue = Number(business.invoiceNumberCurrentValue ?? 0);
+    const prefix = String(business.invoiceNumberPrefix ?? 'INV-');
+    const padding = Number(business.invoiceNumberPadding ?? 3);
+    const currentInvoiceNumber =
+      currentValue > 0 ? formatInvoiceNumber(prefix, currentValue, padding) : '';
+
+    const {
+      invoiceNumberPrefix: _prefix,
+      invoiceNumberPadding: _padding,
+      invoiceNumberCurrentValue: _current,
+      ...rest
+    } = business;
+
+    return {
+      ...rest,
+      currentInvoiceNumber,
+    };
+  }
 
   async getMyBusiness(businessId: string) {
     const business = await this.prisma.business.findUnique({
@@ -40,7 +83,7 @@ export class BusinessesService {
       select: { ...BRANDING_SELECT, reminderSchedule: true },
     });
     if (!business) throw new NotFoundException('Business not found');
-    return business;
+    return this.mapBranding(business);
   }
 
   async getReminderSchedule(businessId: string) {
@@ -80,7 +123,7 @@ export class BusinessesService {
       select: BRANDING_SELECT,
     });
     if (!business) throw new NotFoundException('Business not found');
-    return business;
+    return this.mapBranding(business);
   }
 
   async updateBranding(businessId: string, dto: UpdateBrandingDto) {
@@ -95,12 +138,19 @@ export class BusinessesService {
       if (dto[field] !== undefined) data[field] = dto[field];
     }
 
+    const invoiceSeed = parseInvoiceNumberSeed(dto.currentInvoiceNumber);
+    if (invoiceSeed) {
+      data.invoiceNumberPrefix = invoiceSeed.prefix;
+      data.invoiceNumberPadding = invoiceSeed.padding;
+      data.invoiceNumberCurrentValue = invoiceSeed.currentValue;
+    }
+
     const business = await this.prisma.business.update({
       where: { id: businessId },
       data,
       select: BRANDING_SELECT,
     });
-    return business;
+    return this.mapBranding(business);
   }
 
   // ── Claude API key (§12c.1) ──────────────────────────────────────────────────
@@ -203,6 +253,6 @@ export class BusinessesService {
       data: { logoUrl },
       select: BRANDING_SELECT,
     });
-    return business;
+    return this.mapBranding(business);
   }
 }

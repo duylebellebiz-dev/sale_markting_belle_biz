@@ -14,6 +14,7 @@ import AppShell from '../components/AppShell';
 import { invoicesApi } from '../features/invoices/invoicesApi';
 import { businessesApi } from '../features/businesses/businessesApi';
 import SendInvoiceEmailModal from '../features/invoices/SendInvoiceEmailModal';
+import AddressBlock from '../features/invoices/AddressBlock';
 import { usePermission } from '../features/staff/usePermission';
 import type { CreateInvoicePayload, Invoice } from '../features/invoices/invoicesApi';
 import type { BusinessBranding } from '../features/businesses/businessesApi';
@@ -62,6 +63,7 @@ function toDateInput(iso?: string | null) {
   return new Date(iso).toISOString().slice(0, 10);
 }
 function today() { return new Date().toISOString().slice(0, 10); }
+function asText(value: unknown) { return typeof value === 'string' ? value : String(value ?? ''); }
 
 function blankRow(): LineRow {
   return { id: uid(), serviceId: '', serviceName: '', description: '', serviceTerm: '', quantity: '1', rate: '' };
@@ -92,7 +94,9 @@ function computeLive(rows: LineRow[], disc: number, ship: number, adj: number, t
 function extractMsg(err: unknown) {
   const m = (err as { response?: { data?: { message?: string | string[] } } })
     ?.response?.data?.message;
-  return Array.isArray(m) ? m.join(', ') : (m ?? 'Something went wrong.');
+  if (Array.isArray(m)) return m.join(', ');
+  if (typeof m === 'string' && m.trim()) return m;
+  return (err as { message?: string })?.message ?? 'Something went wrong.';
 }
 
 function cLabel(c: CustomerOption) {
@@ -101,13 +105,6 @@ function cLabel(c: CustomerOption) {
 function billToName(c: CustomerOption | null) {
   if (!c) return '-';
   return c.shopName?.trim() || c.customerName;
-}
-function addressLines(address?: string) {
-  if (!address?.trim()) return [];
-  return address
-    .split(/\r?\n|,\s*/)
-    .map((part) => part.trim())
-    .filter(Boolean);
 }
 function matchC(c: CustomerOption, q: string) {
   const l = q.toLowerCase();
@@ -121,6 +118,18 @@ function matchC(c: CustomerOption, q: string) {
 }
 function matchS(s: ServiceOption, q: string) {
   return s.name.toLowerCase().includes(q.toLowerCase());
+}
+
+function invoiceTaxRegistrationLine(
+  branding: Pick<BusinessBranding, 'gstNumber' | 'pstNumber'> | null,
+  invoiceProvince?: string,
+) {
+  if (!branding) return '';
+  const parts = [branding.gstNumber];
+  if (invoiceProvince === 'BC' && branding.pstNumber) {
+    parts.push(branding.pstNumber);
+  }
+  return parts.filter(Boolean).join('    ');
 }
 
 //  Tailwind shorthands 
@@ -191,6 +200,7 @@ export default function InvoiceBuilderPage() {
   const tax  = parseFloat(taxRate)  || 0;
   const { amounts, subTotal, discAmt, taxAmt, total } = computeLive(rows, disc, ship, adj, tax);
   const balanceDue = r2(total);
+  const taxRegistrationLine = invoiceTaxRegistrationLine(branding, province);
 
   //  Bootstrap 
   useEffect(() => {
@@ -218,7 +228,7 @@ export default function InvoiceBuilderPage() {
     }).catch(() => null);
 
     const p4 = !id
-      ? invoicesApi.nextNumber().then(n => setInvoiceNumber(n as unknown as string)).catch(() => null)
+      ? invoicesApi.nextNumber().then(n => setInvoiceNumber(asText(n))).catch(() => null)
       : Promise.resolve();
 
     const p5 = id
@@ -231,7 +241,7 @@ export default function InvoiceBuilderPage() {
   function populateFromInvoice(inv: Invoice) {
     const cid = typeof inv.customerId === 'object' ? inv.customerId.id : inv.customerId;
     setCustomerId(cid);
-    setInvoiceNumber(inv.invoiceNumber);
+    setInvoiceNumber(asText(inv.invoiceNumber));
     setInvoiceDate(toDateInput(inv.invoiceDate));
     setDueDate(toDateInput(inv.dueDate));
     setTerms(inv.terms ?? '');
@@ -329,14 +339,15 @@ export default function InvoiceBuilderPage() {
 
   function buildPayload(): CreateInvoicePayload | null {
     if (!customerId)          { setActionErr('Please select a customer.');               return null; }
-    if (!invoiceNumber.trim()){ setActionErr('Invoice number is required.');             return null; }
+    const normalizedInvoiceNumber = asText(invoiceNumber).trim();
+    if (!normalizedInvoiceNumber){ setActionErr('Invoice number is required.');          return null; }
     for (const r of rows) {
       if (!r.description.trim()) { setActionErr('Each line item needs a description.'); return null; }
     }
     setActionErr(null);
     return {
       customerId,
-      invoiceNumber: invoiceNumber.trim(),
+      invoiceNumber: normalizedInvoiceNumber,
       invoiceDate:   invoiceDate || undefined,
       dueDate:       dueDate || undefined,
       terms:         terms.trim() || undefined,
@@ -368,8 +379,7 @@ export default function InvoiceBuilderPage() {
     const payload = buildPayload();
     if (!payload) return null;
     if (savedId) {
-      const { customerId: _c, ...upd } = payload;
-      await invoicesApi.update(savedId, upd);
+      await invoicesApi.update(savedId, payload);
       return savedId;
     }
     const inv = await invoicesApi.create(payload);
@@ -389,7 +399,7 @@ export default function InvoiceBuilderPage() {
     setPdfing(true); setActionErr(null);
     try {
       const invId = await ensureSaved();
-      if (invId) await invoicesApi.downloadPdf(invId, invoiceNumber);
+      if (invId) await invoicesApi.downloadPdf(invId, asText(invoiceNumber));
     }
     catch (e) { setActionErr(extractMsg(e)); }
     finally { setPdfing(false); }
@@ -499,27 +509,23 @@ export default function InvoiceBuilderPage() {
 
           {/*  S1 Header: branding + INVOICE label  */}
           <div className="p-8 flex items-start justify-between gap-6">
-            <div className="flex items-start gap-4 min-w-0">
+            <div className="min-w-0">
               {logoSrc ? (
-                <img src={logoSrc} alt="logo" className="h-14 w-auto object-contain shrink-0" />
+                <img src={logoSrc} alt="logo" className="h-16 w-auto object-contain" />
               ) : (
-                <div className="h-14 w-14 rounded-lg bg-indigo-50 border-2 border-dashed border-indigo-200 flex items-center justify-center shrink-0 text-indigo-300 text-xs text-center">
+                <div className="h-16 w-16 rounded-lg bg-indigo-50 border-2 border-dashed border-indigo-200 flex items-center justify-center text-indigo-300 text-xs text-center">
                   Logo
                 </div>
               )}
-              <div className="min-w-0">
-                <p className="font-bold text-gray-900 text-base leading-tight truncate">
-                  {branding?.businessName || 'Your Business'}
-                </p>
-                {branding?.addressLine && (
-                  <p className="text-xs text-gray-500 mt-0.5">{branding.addressLine}</p>
-                )}
-                {(branding?.phone || branding?.website) && (
-                  <p className="text-xs text-gray-400 mt-0.5">
-                    {[branding.phone, branding.website].filter(Boolean).join('  |  ')}
-                  </p>
-                )}
-              </div>
+              <AddressBlock
+                className="mt-4 max-w-xs"
+                name={branding?.businessName || 'Your Business'}
+                address={branding?.addressLine}
+                province={branding?.province}
+                country={branding?.country}
+                nameClassName="text-[1.75rem] font-bold text-gray-900 leading-tight sm:text-[1.9rem]"
+                lineClassName="text-sm text-gray-500 leading-6 sm:text-[15px]"
+              />
             </div>
             <div className="text-right shrink-0">
               <h1 className="text-4xl font-black tracking-tight text-indigo-600">INVOICE</h1>
@@ -537,23 +543,19 @@ export default function InvoiceBuilderPage() {
             <div>
               <p className={LABEL}>Bill To</p>
               {isEditing ? (
-                <div className="space-y-1">
-                  <p className="font-semibold text-gray-900 text-sm">
-                    {billToName(selectedCustomer)}
-                  </p>
-                  {addressLines(selectedCustomer?.shopAddress).length > 0 ? (
-                    <div className="text-xs text-gray-500 leading-5">
-                      {addressLines(selectedCustomer?.shopAddress).map((line, idx) => (
-                        <p key={`${line}-${idx}`}>{line}</p>
-                      ))}
-                    </div>
-                  ) : (
+                <AddressBlock
+                  className="mt-4"
+                  name={billToName(selectedCustomer)}
+                  address={selectedCustomer?.shopAddress}
+                  nameClassName="text-xl font-bold text-gray-900 leading-tight"
+                  lineClassName="text-sm text-gray-500 leading-6"
+                  emptyFallback={
                     <>
-                      {selectedCustomer?.email && <p className="text-xs text-gray-500">{selectedCustomer.email}</p>}
-                      {selectedCustomer?.phoneNumber && <p className="text-xs text-gray-500">{selectedCustomer.phoneNumber}</p>}
+                      {selectedCustomer?.email && <p className="text-sm text-gray-500 mt-1.5">{selectedCustomer.email}</p>}
+                      {selectedCustomer?.phoneNumber && <p className="text-sm text-gray-500">{selectedCustomer.phoneNumber}</p>}
                     </>
-                  )}
-                </div>
+                  }
+                />
               ) : (
                 <div className="relative" ref={custDdRef}>
                   <input
@@ -585,21 +587,21 @@ export default function InvoiceBuilderPage() {
                     </div>
                   )}
                   {selectedCustomer && (
-                    <div className="mt-2 space-y-0.5">
-                      {addressLines(selectedCustomer.shopAddress).length > 0 ? (
-                        <div className="text-xs text-gray-500 leading-5">
-                          {addressLines(selectedCustomer.shopAddress).map((line, idx) => (
-                            <p key={`${line}-${idx}`}>{line}</p>
-                          ))}
-                        </div>
-                      ) : (
-                        <>
-                          {selectedCustomer.email && <p className="text-xs text-gray-500">{selectedCustomer.email}</p>}
-                          {selectedCustomer.phoneNumber && <p className="text-xs text-gray-500">{selectedCustomer.phoneNumber}</p>}
-                        </>
-                      )}
+                    <div className="mt-5">
+                      <AddressBlock
+                        name={billToName(selectedCustomer)}
+                        address={selectedCustomer.shopAddress}
+                        nameClassName="text-lg font-bold text-gray-900 leading-tight"
+                        lineClassName="text-sm text-gray-500 leading-6"
+                        emptyFallback={
+                          <>
+                            {selectedCustomer.email && <p className="text-sm text-gray-500 mt-1.5">{selectedCustomer.email}</p>}
+                            {selectedCustomer.phoneNumber && <p className="text-sm text-gray-500">{selectedCustomer.phoneNumber}</p>}
+                          </>
+                        }
+                      />
                       {!selectedCustomer.shopAddress && !selectedCustomer.email && (
-                        <p className="text-xs text-amber-600 flex items-center gap-1">
+                        <p className="text-xs text-amber-600 flex items-center gap-1 mt-2">
                           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
                           </svg>
@@ -617,7 +619,7 @@ export default function InvoiceBuilderPage() {
               <div className="grid grid-cols-2 gap-3">
                 <div className={FIELD}>
                   <label className={LABEL}>Invoice #</label>
-                  <input value={invoiceNumber} onChange={e => setInvoiceNumber(e.target.value)}
+                  <input value={asText(invoiceNumber)} onChange={e => setInvoiceNumber(e.target.value)}
                     className={INPUT} placeholder="INV-001" maxLength={50} />
                 </div>
                 <div className={FIELD}>
@@ -758,9 +760,9 @@ export default function InvoiceBuilderPage() {
                 placeholder="Payment is due within 30 days..." />
               <span className="text-xs text-gray-400 text-right">{termsConditions.length}/5000</span>
             </div>
-            {(branding?.gstNumber || branding?.pstNumber) && (
+            {taxRegistrationLine && (
               <p className="text-xs text-gray-400">
-                {[branding.gstNumber, branding.pstNumber].filter(Boolean).join('    ')}
+                {taxRegistrationLine}
               </p>
             )}
           </div>
@@ -866,10 +868,10 @@ function LineItemsSection({
       </div>
 
       {/* Table */}
-      <div className="rounded-xl border border-gray-200 overflow-hidden">
+      <div className="rounded-xl border border-gray-200 overflow-visible bg-white">
         {/* Header */}
         <div className="grid bg-indigo-600 text-white text-xs font-semibold uppercase tracking-wide
-                        grid-cols-[28px_1fr_70px_90px_80px_32px] gap-1 px-3 py-2.5">
+                        grid-cols-[28px_1fr_70px_90px_80px_32px] gap-1 px-3 py-2.5 rounded-t-xl">
           <span>#</span>
           <span>Description / Service Term</span>
           <span className="text-right">Qty</span>
@@ -931,15 +933,16 @@ function LineItemRow({
   const filteredS = svcSearch ? services.filter(s => matchS(s, svcSearch)) : services;
 
   return (
-    <div className={`grid grid-cols-[28px_1fr_70px_90px_80px_32px] gap-1 items-start
+    <div className={`relative grid grid-cols-[28px_1fr_70px_90px_80px_32px] gap-1 items-start
                      px-3 py-2.5 border-b border-gray-100 last:border-0
+                     ${svcOpen ? 'z-20' : 'z-0'}
                      ${idx % 2 === 1 ? 'bg-gray-50' : 'bg-white'}`}>
 
       {/* # */}
       <span className="text-xs text-gray-400 pt-2.5 text-center">{idx + 1}</span>
 
       {/* Description col - contains service badge, description input, term input, and inline service picker */}
-      <div className="flex flex-col gap-1.5 relative" ref={svcRef}>
+      <div className="flex flex-col gap-1.5 relative min-w-0" ref={svcRef}>
 
         {/* Service badge (when a service is linked) */}
         {row.serviceId && (
@@ -959,19 +962,19 @@ function LineItemRow({
         )}
 
         {/* Description input - with inline service-picker trigger when no service linked */}
-        <div className="flex items-center gap-1">
+        <div className="flex items-start gap-1.5 min-w-0">
           <input
             value={row.description}
             onChange={e => onUpdate({ description: e.target.value })}
             placeholder={row.serviceId ? 'Description (editable)' : 'Item or service description'}
             maxLength={500}
-            className={INPUT_SM + ' flex-1'}
+            className={INPUT_SM + ' min-w-0 flex-1'}
           />
           {/* Per-row service picker toggle (only when no service linked and services exist) */}
           {!row.serviceId && services.length > 0 && (
             <button type="button"
               onClick={() => { setSvcOpen(o => !o); setSvcSearch(''); }}
-              className="shrink-0 px-2 py-1.5 rounded border border-indigo-200 text-indigo-600 text-xs hover:bg-indigo-50 transition-colors whitespace-nowrap"
+              className="shrink-0 px-2 py-1.5 rounded border border-indigo-200 bg-white text-indigo-600 text-xs hover:bg-indigo-50 transition-colors whitespace-nowrap"
               title="Pick from Services catalogue">
               Pick service
             </button>
@@ -980,7 +983,7 @@ function LineItemRow({
 
         {/* Inline service dropdown for this row */}
         {svcOpen && !row.serviceId && (
-          <div className="absolute top-full left-0 z-30 mt-0.5 w-72 bg-white border border-gray-200 rounded-xl shadow-xl overflow-hidden">
+          <div className="absolute top-full left-0 z-30 mt-1 w-[22rem] max-w-[calc(100vw-8rem)] bg-white border border-gray-200 rounded-xl shadow-2xl ring-1 ring-black/5 overflow-hidden">
             <div className="p-2 border-b border-gray-100">
               <input
                 autoFocus

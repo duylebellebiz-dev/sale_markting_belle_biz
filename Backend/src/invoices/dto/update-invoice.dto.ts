@@ -16,6 +16,10 @@ import { LineItemDto } from './create-invoice.dto';
 export class UpdateInvoiceDto {
   @IsOptional()
   @IsString()
+  customerId?: string;
+
+  @IsOptional()
+  @IsString()
   @MinLength(1)
   @MaxLength(50)
   invoiceNumber?: string;
