@@ -316,12 +316,25 @@ export class InvoicesService {
     });
     if (!business) return;
 
-    const shouldAdvance =
-      parsed.value > (business.invoiceNumberCurrentValue ?? 0) ||
-      parsed.prefix !== (business.invoiceNumberPrefix ?? 'INV-') ||
-      parsed.padding !== (business.invoiceNumberPadding ?? 3);
+    const currentPrefix = business.invoiceNumberPrefix ?? 'INV-';
+    const currentPadding = business.invoiceNumberPadding ?? 3;
+    const fitsCurrentFormat = parsed.prefix === currentPrefix && parsed.padding === currentPadding;
 
-    if (!shouldAdvance) return;
+    if (fitsCurrentFormat) {
+      // Matches the configured scheme exactly — just advance the counter, never touch the format.
+      if (parsed.value > (business.invoiceNumberCurrentValue ?? 0)) {
+        await tx.business.update({
+          where: { id: businessId },
+          data: { invoiceNumberCurrentValue: parsed.value },
+        });
+      }
+      return;
+    }
+
+    // A bare numeric string (no separator before the digits) is ambiguous — it could be
+    // "<prefix><padded number>" with no separator, not a brand-new empty-prefix scheme.
+    // Adopting it as-is would silently corrupt the prefix/padding for all future invoices.
+    if (parsed.prefix === '') return;
 
     await tx.business.update({
       where: { id: businessId },
@@ -331,6 +344,53 @@ export class InvoicesService {
         invoiceNumberCurrentValue: parsed.value,
       },
     });
+  }
+
+  private async getRewindInvoiceCounterValueBeforeDelete(
+    db: DbClient,
+    businessId: string,
+    invoiceId: string,
+    invoiceNumber: string,
+  ): Promise<number | null> {
+    const business = await db.business.findUnique({
+      where: { id: businessId },
+      select: {
+        invoiceNumberCurrentValue: true,
+        invoiceNumberPrefix: true,
+        invoiceNumberPadding: true,
+      },
+    });
+    if (!business) return null;
+
+    const currentValue = business.invoiceNumberCurrentValue ?? 0;
+    const prefix = business.invoiceNumberPrefix ?? 'INV-';
+    const padding = business.invoiceNumberPadding ?? 3;
+
+    // Only rewind when the deleted invoice is the one that last advanced the
+    // counter (its number matches the business's current configured format
+    // exactly), so deleting an older/manually-numbered invoice never disturbs
+    // numbers issued after it.
+    const matchesCurrentFormat = invoiceNumber === formatInvoiceNumber(prefix, currentValue, padding);
+
+    if (!matchesCurrentFormat) return null;
+
+    let rewindTo = 0;
+    for (let value = currentValue - 1; value >= 1; value -= 1) {
+      const existing = await db.invoice.findFirst({
+        where: {
+          businessId,
+          invoiceNumber: formatInvoiceNumber(prefix, value, padding),
+          NOT: { id: invoiceId },
+        },
+        select: { id: true },
+      });
+      if (existing) {
+        rewindTo = value;
+        break;
+      }
+    }
+
+    return rewindTo;
   }
 
   // ---------------------------------------------------------------------------
@@ -573,8 +633,32 @@ export class InvoicesService {
   }
 
   async remove(user: RequestUser, id: string) {
-    await this.resolveInvoice(user, id);
-    await this.prisma.invoice.delete({ where: { id } });
+    const invoice = await this.resolveInvoice(user, id);
+    const rewindTo = await this.getRewindInvoiceCounterValueBeforeDelete(
+      this.prisma,
+      user.businessId,
+      id,
+      invoice.invoiceNumber,
+    );
+
+    const ops: Prisma.PrismaPromise<unknown>[] = [
+      this.prisma.subscription.updateMany({
+        where: { businessId: user.businessId, invoiceId: id },
+        data: { invoiceId: null },
+      }),
+      this.prisma.invoice.delete({ where: { id } }),
+    ];
+
+    if (rewindTo != null) {
+      ops.push(
+        this.prisma.business.update({
+          where: { id: user.businessId },
+          data: { invoiceNumberCurrentValue: rewindTo },
+        }),
+      );
+    }
+
+    await this.prisma.$transaction(ops);
     return { message: 'Invoice deleted' };
   }
 

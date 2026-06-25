@@ -107,8 +107,10 @@ export default function BrandingPage() {
     setUploading(true);
     try {
       const updated = await businessesApi.uploadLogo(logoFile);
-      setBranding((b) => b ? { ...b, logoUrl: updated.logoUrl } : b);
+      setBranding(updated);
       setLogoFile(null);
+      setLogoPreview(null);
+      if (fileInputRef.current) fileInputRef.current.value = '';
       setLogoSaved(true);
       setTimeout(() => setLogoSaved(false), 4000);
     } catch (err: unknown) {

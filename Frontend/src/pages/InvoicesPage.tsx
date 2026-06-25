@@ -22,7 +22,7 @@ function fmt(iso?: string) {
 }
 
 function money(n: number) {
-  return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 const STATUS_ORDER: Invoice['status'][] = ['Draft', 'Sent', 'Partially Paid', 'Overdue', 'Paid', 'Cancelled'];
@@ -67,7 +67,7 @@ export default function InvoicesPage() {
   const overdueCount  = invoices.filter((i) => i.status === 'Overdue').length;
   const totalOutstanding = invoices
     .filter((i) => i.status !== 'Paid' && i.status !== 'Cancelled' && i.status !== 'Draft')
-    .reduce((s, i) => s + (i.balanceDue ?? 0), 0);
+    .reduce((s, i) => s + Number(i.balanceDue ?? 0), 0);
 
   return (
     <AppShell title="Invoices">
@@ -191,8 +191,8 @@ export default function InvoicesPage() {
                   </thead>
                   <tbody className="divide-y divide-gray-100">
                     {filtered.map((inv) => {
-                      const balance = inv.balanceDue ?? 0;
-                      const total   = inv.total ?? 0;
+                      const balance = Number(inv.balanceDue ?? 0);
+                      const total   = Number(inv.total ?? 0);
                       const isPartial = inv.status === 'Partially Paid';
 
                       return (

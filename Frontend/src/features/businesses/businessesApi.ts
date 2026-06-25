@@ -83,9 +83,10 @@ export const businessesApi = {
     const form = new FormData();
     form.append('logo', file);
     return api
-      .post<BusinessBranding>('/businesses/branding/logo', form, {
+      .post<{ data: BusinessBranding; message: string }>('/businesses/branding/logo', form, {
         headers: { 'Content-Type': 'multipart/form-data' },
       })
-      .then(d<BusinessBranding>);
+      .then(d<{ data: BusinessBranding; message: string }>)
+      .then((res) => res.data);
   },
 };
