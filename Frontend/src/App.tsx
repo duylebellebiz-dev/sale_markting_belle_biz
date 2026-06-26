@@ -20,10 +20,13 @@ import InvoiceDetailPage from './pages/InvoiceDetailPage';
 import ImportPage from './pages/ImportPage';
 import AiSettingsPage from './pages/AiSettingsPage';
 import EmailSenderSettingsPage from './pages/EmailSenderSettingsPage';
+import UnmatchedRepliesPage from './pages/UnmatchedRepliesPage';
 import AdAccountsPage from './pages/AdAccountsPage';
 import CampaignsPage from './pages/CampaignsPage';
 import CampaignDetailPage from './pages/CampaignDetailPage';
 import BatchAnalysisPage from './pages/BatchAnalysisPage';
+import PrivacyPolicyPage from './pages/PrivacyPolicyPage';
+import TermsOfServicePage from './pages/TermsOfServicePage';
 
 export default function App() {
   return (
@@ -34,6 +37,8 @@ export default function App() {
             {/* Public routes */}
             <Route path="/login" element={<LoginPage />} />
             <Route path="/register" element={<RegisterPage />} />
+            <Route path="/privacy-policy" element={<PrivacyPolicyPage />} />
+            <Route path="/terms-of-service" element={<TermsOfServicePage />} />
 
             {/* Protected: any authenticated user */}
             <Route element={<ProtectedRoute />}>
@@ -63,6 +68,7 @@ export default function App() {
               <Route path="/branding" element={<BrandingPage />} />
               <Route path="/ai-settings" element={<AiSettingsPage />} />
               <Route path="/email-sender-settings" element={<EmailSenderSettingsPage />} />
+              <Route path="/email/unmatched" element={<UnmatchedRepliesPage />} />
             </Route>
 
             {/* Catch-all */}

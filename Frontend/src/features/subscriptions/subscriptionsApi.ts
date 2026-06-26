@@ -44,6 +44,7 @@ export interface CreateSubscriptionPayload {
   customerId: string;
   serviceId: string;
   invoiceId?: string;
+  createInvoice?: boolean;
   closingDate?: string;
   startDate?: string;
   expiryDate: string;
@@ -55,6 +56,7 @@ export interface RenewPayload {
   expiryDate: string;
   startDate?: string;
   invoiceId?: string;
+  createInvoice?: boolean;
   servicePrice?: number;
   note?: string;
 }

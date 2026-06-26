@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { InvoiceActivityType, InvoiceStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { EmailService } from '../email/email.service';
+import { ResendEmailService } from '../email/resend-email.service';
 import { InvoicePdfService } from './invoice-pdf.service';
 import { CreateInvoiceDto, LineItemDto } from './dto/create-invoice.dto';
 import { UpdateInvoiceDto } from './dto/update-invoice.dto';
@@ -156,7 +156,7 @@ function buildInvoicePdfFilename(invoice: any): string {
 export class InvoicesService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly emailService: EmailService,
+    private readonly emailService: ResendEmailService,
     private readonly pdfService: InvoicePdfService,
   ) {}
 

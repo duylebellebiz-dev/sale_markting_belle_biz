@@ -22,6 +22,7 @@ const ownerNav: NavItem[] = [
   { label: 'Import Data',     path: '/import',            icon: 'upload' },
   { label: 'AI Settings',     path: '/ai-settings',       icon: 'cpu' },
   { label: 'Email Sender',    path: '/email-sender-settings', icon: 'send' },
+  { label: 'Unmatched Replies', path: '/email/unmatched',     icon: 'mail' },
   { label: 'Ad Accounts',    path: '/ad-accounts',       icon: 'trending-up' },
   { label: 'Campaigns',      path: '/campaigns',          icon: 'activity' },
 ];

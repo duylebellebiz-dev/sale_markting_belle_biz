@@ -10,7 +10,7 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { UpdateClaudeKeyDto } from './dto/update-claude-key.dto';
-import { UpdateSmtpSettingsDto } from './dto/update-smtp-settings.dto';
+import { UpdateResendSettingsDto } from './dto/update-resend-settings.dto';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import * as path from 'path';
@@ -93,47 +93,44 @@ export class BusinessesController {
     return { message: 'Claude API key saved successfully' };
   }
 
-  // ── SMTP settings: send campaigns from the business's own mailbox ──────────
+  // ── Per-business Resend settings ────────────────────────────────────────────
+  // Each business registers its OWN Resend account/domain — own quota, own brand —
+  // instead of sharing the operator's RESEND_API_KEY / RESEND_FROM_EMAIL fallback.
 
   /**
    * GET /businesses/settings/email
-   * Returns the configured SMTP host/port/user/fromName (never the password).
+   * Returns whether a business-owned Resend key is configured, plus fromEmail/fromName.
+   * Never returns the key itself.
    */
   @Roles('owner')
   @Get('settings/email')
-  getSmtpSettings(@CurrentUser() user: RequestUser) {
-    return this.businessesService.getSmtpSettings(user.businessId);
+  getResendSettings(@CurrentUser() user: RequestUser) {
+    return this.businessesService.getResendSettings(user.businessId);
   }
 
   /**
    * PATCH /businesses/settings/email
-   * Owner sets/replaces SMTP credentials for their own mailbox (e.g. Gmail
-   * with an App Password). Stored encrypted. Falls back to Resend if unset.
+   * Owner sets/replaces their own Resend API key + verified sender. Stored encrypted.
    */
   @Roles('owner')
   @Patch('settings/email')
-  async setSmtpSettings(
+  async setResendSettings(
     @CurrentUser() user: RequestUser,
-    @Body() dto: UpdateSmtpSettingsDto,
+    @Body() dto: UpdateResendSettingsDto,
   ) {
-    const data = await this.businessesService.setSmtpSettings(
-      user.businessId,
-      dto,
-    );
-    return { data, message: 'Email sender settings saved successfully' };
+    const data = await this.businessesService.setResendSettings(user.businessId, dto);
+    return { data, message: 'Resend sender settings saved successfully' };
   }
 
   /**
    * DELETE /businesses/settings/email
-   * Clears the SMTP config — campaigns fall back to the shared Resend sender.
+   * Clears the business's own Resend config — sends fall back to the shared operator account.
    */
   @Roles('owner')
   @Delete('settings/email')
-  async clearSmtpSettings(@CurrentUser() user: RequestUser) {
-    const data = await this.businessesService.clearSmtpSettings(
-      user.businessId,
-    );
-    return { data, message: 'Email sender settings cleared' };
+  async clearResendSettings(@CurrentUser() user: RequestUser) {
+    const data = await this.businessesService.clearResendSettings(user.businessId);
+    return { data, message: 'Resend sender settings cleared' };
   }
 
   /**

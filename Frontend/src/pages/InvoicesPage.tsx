@@ -307,6 +307,13 @@ export default function InvoicesPage() {
                                 {['Draft', 'Cancelled'].includes(inv.status) && canInvoice && (
                                   <Btn onClick={() => setConfirmId(inv.id)} danger>Delete</Btn>
                                 )}
+
+                                {/* Hint - delete requires cancelling first */}
+                                {!['Draft', 'Cancelled', 'Paid'].includes(inv.status) && canInvoice && (
+                                  <span className="text-xs text-gray-400" title="Cancel this invoice first to enable Delete">
+                                    Cancel to delete
+                                  </span>
+                                )}
                               </span>
                             )}
                           </td>

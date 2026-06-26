@@ -27,7 +27,7 @@ function buildVars(inv: Invoice): Record<string, string> {
   return {
     customer_name:    inv.billTo?.name || customerObj?.customerName || 'Valued Customer',
     shop_name:        (customerObj as any)?.shopName || '',
-    invoice_amount:   `$${(inv.total ?? 0).toFixed(2)}`,
+    invoice_amount:   `$${(Number(inv.total) || 0).toFixed(2)}`,
     service_name:     inv.lineItems?.[0]?.description || '',
     expiry_date:      '',
     salesperson_name: '',

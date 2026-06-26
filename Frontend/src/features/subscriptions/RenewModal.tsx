@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import api from '../../lib/api';
 import type { Subscription, RenewPayload } from './subscriptionsApi';
 
-interface Invoice { id: string; invoiceNumber: string; total?: number; }
+interface InvoiceLineItem { serviceId?: string | null; rate: number; }
+interface Invoice { id: string; invoiceNumber: string; total?: number; lineItems?: InvoiceLineItem[]; }
 
 interface Props {
   subscription: Subscription;
@@ -31,11 +32,17 @@ function serviceLabel(sub: Subscription): string {
   return '-';
 }
 
+function serviceIdOf(sub: Subscription): string {
+  if (typeof sub.serviceId === 'object') return sub.serviceId.id;
+  return sub.serviceId;
+}
+
 export default function RenewModal({ subscription, onSubmit, onClose }: Props) {
   const [expiryDate,   setExpiryDate]   = useState('');
   const [startDate,    setStartDate]    = useState(new Date().toISOString().slice(0, 10));
   const [servicePrice, setServicePrice] = useState(String(subscription.servicePrice));
   const [invoiceId,    setInvoiceId]    = useState('');
+  const [createInvoice, setCreateInvoice] = useState(true);
   const [note,         setNote]         = useState('');
   const [invoices,     setInvoices]     = useState<Invoice[]>([]);
   const [submitting,   setSubmitting]   = useState(false);
@@ -52,6 +59,13 @@ export default function RenewModal({ subscription, onSubmit, onClose }: Props) {
     }
   }, [subscription]);
 
+  function handleInvoiceChange(id: string) {
+    setInvoiceId(id);
+    const inv = invoices.find((i) => i.id === id);
+    const lineItem = inv?.lineItems?.find((li) => li.serviceId === serviceIdOf(subscription));
+    if (lineItem) setServicePrice(String(lineItem.rate));
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
@@ -60,10 +74,11 @@ export default function RenewModal({ subscription, onSubmit, onClose }: Props) {
     try {
       await onSubmit({
         expiryDate,
-        startDate:    startDate    || undefined,
-        invoiceId:    invoiceId    || undefined,
-        servicePrice: servicePrice ? parseFloat(servicePrice) : undefined,
-        note:         note         || undefined,
+        startDate:     startDate    || undefined,
+        invoiceId:     invoiceId    || undefined,
+        createInvoice: !invoiceId && createInvoice,
+        servicePrice:  servicePrice ? parseFloat(servicePrice) : undefined,
+        note:          note         || undefined,
       });
       onClose();
     } catch (err: unknown) {
@@ -111,12 +126,23 @@ export default function RenewModal({ subscription, onSubmit, onClose }: Props) {
 
           <div className="flex flex-col gap-1">
             <label className="text-xs font-medium text-gray-600 uppercase tracking-wide">Link Invoice</label>
-            <select value={invoiceId} onChange={(e) => setInvoiceId(e.target.value)} className={INPUT}>
+            <select value={invoiceId} onChange={(e) => handleInvoiceChange(e.target.value)} className={INPUT} disabled={createInvoice}>
               <option value="">- Optional -</option>
               {invoices.map((inv) => (
-                <option key={inv.id} value={inv.id}>#{inv.invoiceNumber} (${(inv.total ?? 0).toFixed(2)})</option>
+                <option key={inv.id} value={inv.id}>#{inv.invoiceNumber} (${Number(inv.total ?? 0).toFixed(2)})</option>
               ))}
             </select>
+            {!invoiceId && (
+              <label className="mt-2 flex items-center gap-2 text-xs text-gray-600">
+                <input
+                  type="checkbox"
+                  checked={createInvoice}
+                  onChange={(e) => setCreateInvoice(e.target.checked)}
+                  className="rounded border-gray-300"
+                />
+                Auto-create a Draft invoice for the new period
+              </label>
+            )}
           </div>
 
           <div className="flex flex-col gap-1">

@@ -15,7 +15,7 @@ import {
 import * as fs from 'fs';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailTemplateService } from './email-template.service';
-import { EmailService } from './email.service';
+import { ResendEmailService } from './resend-email.service';
 import { EmailTrackingService } from './email-tracking.service';
 import { SendCampaignDto, SegmentFilter } from './dto/send-campaign.dto';
 import type { RequestUser } from '../common/decorators/current-user.decorator';
@@ -62,7 +62,7 @@ export class EmailCampaignService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly emailTemplateService: EmailTemplateService,
-    private readonly emailService: EmailService,
+    private readonly emailService: ResendEmailService,
     private readonly emailTrackingService: EmailTrackingService,
   ) {}
 

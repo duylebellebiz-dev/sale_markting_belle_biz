@@ -46,6 +46,18 @@ enum NotificationType {
   followup
   invoice
   renewal
+  email_reply
+}
+
+enum GmailConnectionStatus {
+  connected
+  disconnected
+  error
+}
+
+enum EmailMessageDirection {
+  outbound
+  inbound
 }
 
 enum FollowUpHistoryType {
@@ -82,7 +94,7 @@ enum AdChatRole {
 
 enum AdAccountStatus {
   active
-  disconnected  // token expired / revoked — re-auth required
+  disconnected // token expired / revoked — re-auth required
   error
 }
 
@@ -109,67 +121,76 @@ enum EmailLogStatus {
 
 // Owner account. No businessId FK — this IS the tenant root.
 model Business {
-  id                  String   @id @default(cuid())
-  businessName        String
-  email               String   @unique
-  passwordHash        String
+  id           String @id @default(cuid())
+  businessName String
+  email        String @unique
+  passwordHash String
 
   // Branding & company info for invoices (§5 / §12.1)
-  logoUrl             String   @default("")
-  addressLine         String   @default("")
-  country             String   @default("")
-  phone               String   @default("")
-  website             String   @default("")
-  gstNumber           String   @default("")
-  pstNumber           String   @default("")
-  defaultTaxRate      Float    @default(0)
-  province            String   @default("")   // 2-letter Canadian province code
-  defaultCustomerNote String   @default("")
-  defaultTerms        String   @default("")
-  invoiceNumberPrefix String   @default("INV-")
-  invoiceNumberPadding Int     @default(3)
-  invoiceNumberCurrentValue Int @default(0)
+  logoUrl                   String @default("")
+  addressLine               String @default("")
+  country                   String @default("")
+  phone                     String @default("")
+  website                   String @default("")
+  gstNumber                 String @default("")
+  pstNumber                 String @default("")
+  defaultTaxRate            Float  @default(0)
+  province                  String @default("") // 2-letter Canadian province code
+  defaultCustomerNote       String @default("")
+  defaultTerms              String @default("")
+  invoiceNumberPrefix       String @default("INV-")
+  invoiceNumberPadding      Int    @default(3)
+  invoiceNumberCurrentValue Int    @default(0)
 
   // Encrypted Claude API key for AI analysis (§12c.1). AES-256-GCM, never returned to frontend.
-  claudeApiKey        String   @default("")
+  claudeApiKey String @default("")
 
-  // Optional per-business SMTP so emails send from the business's own mailbox
-  // instead of the shared Resend sender. Falls back to Resend when smtpHost is empty.
-  smtpHost            String   @default("")
-  smtpPort            Int      @default(587)
-  smtpSecure          Boolean  @default(false)
-  smtpUser            String   @default("")
-  smtpPassword        String   @default("")   // AES-256-GCM encrypted, never returned to frontend
-  smtpFromName        String   @default("")
+  // Per-business Resend sender (owner registers their OWN Resend account/domain).
+  // AES-256-GCM encrypted, never returned to frontend. Falls back to the shared
+  // RESEND_API_KEY / RESEND_FROM_EMAIL in .env when empty.
+  resendApiKey    String @default("")
+  resendFromEmail String @default("")
+  resendFromName  String @default("")
+
+  // DEPRECATED — SMTP sending has been replaced by Resend (see ResendEmailService).
+  // Columns kept (unused) to avoid a destructive migration on existing data.
+  smtpHost     String  @default("")
+  smtpPort     Int     @default(587)
+  smtpSecure   Boolean @default(false)
+  smtpUser     String  @default("")
+  smtpPassword String  @default("") // AES-256-GCM encrypted, never returned to frontend
+  smtpFromName String  @default("")
 
   // Configurable day-offset schedules (§7.4); Json keeps them editable without schema changes
-  reminderSchedule    Json     @default("{\"invoiceReminderDays\":[1,2,4,7,14],\"renewalReminderDays\":[30,14,7,3,1]}")
+  reminderSchedule Json @default("{\"invoiceReminderDays\":[1,2,4,7,14],\"renewalReminderDays\":[30,14,7,3,1]}")
 
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  users          User[]
-  customers      Customer[]
-  invoices       Invoice[]
-  services       Service[]
-  subscriptions  Subscription[]
-  notifications  Notification[]
-  emailTemplates EmailTemplate[]
-  emailCampaigns EmailCampaign[]
-  emailLogs      EmailLog[]
-  adConnections  AdConnection[]
-  adAccounts     AdAccount[]
-  campaigns      Campaign[]
-  adAnalyses          AdAnalysis[]
-  adChatMessages      AdChatMessage[]
-  adBatchAnalyses     AdBatchAnalysis[]
-  adBatchChatMessages AdBatchChatMessage[]
-  campaignKeywords    CampaignKeyword[]
-  campaignSearchTerms CampaignSearchTerm[]
-  campaignTargetings  CampaignTargeting[]
+  users                User[]
+  customers            Customer[]
+  invoices             Invoice[]
+  services             Service[]
+  subscriptions        Subscription[]
+  notifications        Notification[]
+  emailTemplates       EmailTemplate[]
+  emailCampaigns       EmailCampaign[]
+  emailLogs            EmailLog[]
+  adConnections        AdConnection[]
+  adAccounts           AdAccount[]
+  campaigns            Campaign[]
+  adAnalyses           AdAnalysis[]
+  adChatMessages       AdChatMessage[]
+  adBatchAnalyses      AdBatchAnalysis[]
+  adBatchChatMessages  AdBatchChatMessage[]
+  campaignKeywords     CampaignKeyword[]
+  campaignSearchTerms  CampaignSearchTerm[]
+  campaignTargetings   CampaignTargeting[]
   campaignDemographics CampaignDemographic[]
-  followUpHistory     FollowUpHistory[]
-  invoiceActivities   InvoiceActivity[]
+  followUpHistory      FollowUpHistory[]
+  invoiceActivities    InvoiceActivity[]
+  gmailConnection      GmailConnection?
+  emailMessages        EmailMessage[]
 }
 
 // Salesperson / owner staff account (§4 / §5)
@@ -182,22 +203,22 @@ model User {
   role         UserRole @default(salesperson)
 
   // Owner-configurable permission flags (§4); Json — the owner toggles flags per staff member
-  permissions  Json     @default("{\"viewAllCustomers\":false,\"manageCustomers\":true,\"sendEmail\":true,\"manageEmailTemplates\":false,\"createInvoice\":true,\"exportInvoicePdf\":false,\"manageServices\":false,\"viewReports\":false,\"exportExcel\":false,\"importData\":false,\"analyzeAds\":false,\"manageStaff\":false}")
+  permissions Json @default("{\"viewAllCustomers\":false,\"manageCustomers\":true,\"sendEmail\":true,\"manageEmailTemplates\":false,\"createInvoice\":true,\"exportInvoicePdf\":false,\"manageServices\":false,\"viewReports\":false,\"exportExcel\":false,\"importData\":false,\"analyzeAds\":false,\"manageStaff\":false}")
 
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  business       Business        @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  customers       Customer[]      @relation("AssignedSalesperson")
-  notifications   Notification[]
-  emailTemplates  EmailTemplate[]
-  emailCampaigns  EmailCampaign[]
-  adAnalyses      AdAnalysis[]
-  adChatMessages  AdChatMessage[]
-  adBatchAnalyses AdBatchAnalysis[]
+  business            Business             @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  customers           Customer[]           @relation("AssignedSalesperson")
+  notifications       Notification[]
+  emailTemplates      EmailTemplate[]
+  emailCampaigns      EmailCampaign[]
+  adAnalyses          AdAnalysis[]
+  adChatMessages      AdChatMessage[]
+  adBatchAnalyses     AdBatchAnalysis[]
   adBatchChatMessages AdBatchChatMessage[]
-  adConnections   AdConnection[]      // OAuth logins this staff member made (owns the tokens)
-  adAccountAccess AdAccountAccess[]   // fanpages/ad accounts shared TO this staff member
+  adConnections       AdConnection[] // OAuth logins this staff member made (owns the tokens)
+  adAccountAccess     AdAccountAccess[] // fanpages/ad accounts shared TO this staff member
 
   @@index([businessId])
 }
@@ -206,29 +227,30 @@ model User {
 model Customer {
   id              String        @id @default(cuid())
   businessId      String
-  assignedToId    String        // FK to User (the salesperson)
+  assignedToId    String // FK to User (the salesperson)
   customerName    String
   shopName        String        @default("")
-  shopAddress     String        @default("")   // street + city + province + postal code
+  shopAddress     String        @default("") // street + city + province + postal code
   email           String        @default("")
   phoneNumber     String        @default("")
   shopPhoneNumber String        @default("")
   contactSource   String        @default("")
   dateOfContact   DateTime?
   stage           PipelineStage @default(Lead)
-  status          String        @default("")   // free-text label e.g. 'Interested', 'Potential'
+  status          String        @default("") // free-text label e.g. 'Interested', 'Potential'
   note            String        @default("")
   nextFollowUpAt  DateTime?
   isClosed        Boolean       @default(false)
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 
-  business      Business       @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  assignedTo    User           @relation("AssignedSalesperson", fields: [assignedToId], references: [id])
-  invoices      Invoice[]
-  subscriptions Subscription[]
-  emailLogs     EmailLog[]
+  business        Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  assignedTo      User              @relation("AssignedSalesperson", fields: [assignedToId], references: [id])
+  invoices        Invoice[]
+  subscriptions   Subscription[]
+  emailLogs       EmailLog[]
   followUpHistory FollowUpHistory[]
+  emailMessages   EmailMessage[]
 
   @@index([businessId])
   @@index([assignedToId])
@@ -245,7 +267,7 @@ model Service {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
-  business      Business         @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  business      Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
   lineItems     InvoiceLineItem[]
   subscriptions Subscription[]
 
@@ -254,35 +276,35 @@ model Service {
 
 // Invoice header (§5 / §12.2). Money fields are all server-computed — never trust client totals.
 model Invoice {
-  id              String        @id @default(cuid())
-  businessId      String
-  customerId      String
-  invoiceNumber   String
+  id            String @id @default(cuid())
+  businessId    String
+  customerId    String
+  invoiceNumber String
 
-  invoiceDate     DateTime
-  dueDate         DateTime?
-  terms           String        @default("")   // e.g. 'Due on Receipt', 'Net 30'
+  invoiceDate DateTime
+  dueDate     DateTime?
+  terms       String    @default("") // e.g. 'Due on Receipt', 'Net 30'
 
   // Snapshot of the customer's billing address at creation time (§5)
   // Stored as Json so the invoice stays correct even if the customer record changes.
-  billTo          Json          @default("{\"name\":\"\",\"addressLine\":\"\",\"email\":\"\",\"phone\":\"\"}")
+  billTo Json @default("{\"name\":\"\",\"addressLine\":\"\",\"email\":\"\",\"phone\":\"\"}")
 
   // Money totals — all Decimal for exactness (§5)
-  subTotal        Decimal       @default(0) @db.Decimal(12, 2)
-  discount        Float         @default(0)               // percent 0–100
-  shippingCharges Decimal       @default(0) @db.Decimal(12, 2)
-  adjustment      Decimal       @default(0) @db.Decimal(12, 2) // can be negative
-  taxRate         Float         @default(0)               // percent 0–100
-  province        String        @default("")              // 2-letter Canadian province code
-  taxLabel        String        @default("")              // e.g. 'GST', 'HST', 'GST + PST'
-  taxAmount       Decimal       @default(0) @db.Decimal(12, 2)
-  total           Decimal       @default(0) @db.Decimal(12, 2)
-  amountPaid      Decimal       @default(0) @db.Decimal(12, 2)
-  balanceDue      Decimal       @default(0) @db.Decimal(12, 2)
+  subTotal        Decimal @default(0) @db.Decimal(12, 2)
+  discount        Float   @default(0) // percent 0–100
+  shippingCharges Decimal @default(0) @db.Decimal(12, 2)
+  adjustment      Decimal @default(0) @db.Decimal(12, 2) // can be negative
+  taxRate         Float   @default(0) // percent 0–100
+  province        String  @default("") // 2-letter Canadian province code
+  taxLabel        String  @default("") // e.g. 'GST', 'HST', 'GST + PST'
+  taxAmount       Decimal @default(0) @db.Decimal(12, 2)
+  total           Decimal @default(0) @db.Decimal(12, 2)
+  amountPaid      Decimal @default(0) @db.Decimal(12, 2)
+  balanceDue      Decimal @default(0) @db.Decimal(12, 2)
 
-  customerNote    String        @default("")
-  termsConditions String        @default("")  // GST/PST registration numbers etc.
-  attachments     Json          @default("[]") // [{ filename, path, mimeType, size }]
+  customerNote    String @default("")
+  termsConditions String @default("") // GST/PST registration numbers etc.
+  attachments     Json   @default("[]") // [{ filename, path, mimeType, size }]
 
   status              InvoiceStatus @default(Draft)
   dateSent            DateTime?
@@ -294,8 +316,8 @@ model Invoice {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  business      Business         @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  customer      Customer         @relation(fields: [customerId], references: [id])
+  business      Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  customer      Customer          @relation(fields: [customerId], references: [id])
   lineItems     InvoiceLineItem[]
   payments      Payment[]
   subscriptions Subscription[]
@@ -310,16 +332,16 @@ model Invoice {
 }
 
 model FollowUpHistory {
-  id                String              @id @default(cuid())
-  businessId        String
-  customerId        String
-  actorUserId       String?
-  type              FollowUpHistoryType
-  note              String              @default("")
-  nextFollowUpAt    DateTime?
+  id                  String              @id @default(cuid())
+  businessId          String
+  customerId          String
+  actorUserId         String?
+  type                FollowUpHistoryType
+  note                String              @default("")
+  nextFollowUpAt      DateTime?
   reminderTriggeredAt DateTime?
-  createdAt         DateTime            @default(now())
-  updatedAt         DateTime            @updatedAt
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
 
   business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
   customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
@@ -332,7 +354,7 @@ model FollowUpHistory {
 model InvoiceLineItem {
   id          String   @id @default(cuid())
   invoiceId   String
-  serviceId   String?  // null → manually-entered item; set → picked from Service catalog
+  serviceId   String? // null → manually-entered item; set → picked from Service catalog
   description String
   serviceTerm String   @default("") // e.g. 'June 15, 2026 - June 14, 2027'
   quantity    Float
@@ -365,15 +387,15 @@ model Payment {
 }
 
 model InvoiceActivity {
-  id               String              @id @default(cuid())
-  businessId       String
-  invoiceId        String
-  actorUserId      String?
-  type             InvoiceActivityType
-  note             String              @default("")
-  balanceSnapshot  Decimal?            @db.Decimal(12, 2)
-  createdAt        DateTime            @default(now())
-  updatedAt        DateTime            @updatedAt
+  id              String              @id @default(cuid())
+  businessId      String
+  invoiceId       String
+  actorUserId     String?
+  type            InvoiceActivityType
+  note            String              @default("")
+  balanceSnapshot Decimal?            @db.Decimal(12, 2)
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
 
   business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
   invoice  Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
@@ -384,26 +406,26 @@ model InvoiceActivity {
 
 // Closed deal / active service subscription (§5 / §7.3)
 model Subscription {
-  id           String             @id @default(cuid())
-  businessId   String
-  customerId   String
-  serviceId    String
-  servicePrice Decimal            @db.Decimal(12, 2) // snapshot of price at closing time
-  invoiceId    String?
-  closingDate  DateTime?
-  startDate    DateTime?
-  expiryDate   DateTime           // drives renewal reminders
-  status       SubscriptionStatus @default(Active)
+  id             String             @id @default(cuid())
+  businessId     String
+  customerId     String
+  serviceId      String
+  servicePrice   Decimal            @db.Decimal(12, 2) // snapshot of price at closing time
+  invoiceId      String?
+  closingDate    DateTime?
+  startDate      DateTime?
+  expiryDate     DateTime // drives renewal reminders
+  status         SubscriptionStatus @default(Active)
   nextReminderAt DateTime?
-  reminderStep Int                @default(0)
-  note         String             @default("")
-  createdAt    DateTime           @default(now())
-  updatedAt    DateTime           @updatedAt
+  reminderStep   Int                @default(0)
+  note           String             @default("")
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
 
-  business Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  customer Customer  @relation(fields: [customerId], references: [id])
-  service  Service   @relation(fields: [serviceId], references: [id])
-  invoice  Invoice?  @relation(fields: [invoiceId], references: [id])
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  customer Customer @relation(fields: [customerId], references: [id])
+  service  Service  @relation(fields: [serviceId], references: [id])
+  invoice  Invoice? @relation(fields: [invoiceId], references: [id])
 
   @@index([businessId])
   @@index([customerId])
@@ -418,7 +440,7 @@ model Notification {
   targetUserId String
   type         NotificationType
   message      String
-  relatedId    String?          // cuid of the triggering Customer / Invoice / Subscription
+  relatedId    String? // cuid of the triggering Customer / Invoice / Subscription
   isRead       Boolean          @default(false)
   createdAt    DateTime         @default(now())
   updatedAt    DateTime         @updatedAt
@@ -458,10 +480,10 @@ model EmailCampaign {
   templateId  String?
   subject     String
   bodyHtml    String
-  attachments Json           @default("[]")  // [{ filename, path, mimeType, size }]
-  segment     Json           @default("{}")  // filter criteria used to resolve recipients
-  cc          String[]       @default([])    // optional, applied to every recipient in this send
-  bcc         String[]       @default([])    // optional, applied to every recipient in this send
+  attachments Json           @default("[]") // [{ filename, path, mimeType, size }]
+  segment     Json           @default("{}") // filter criteria used to resolve recipients
+  cc          String[]       @default([]) // optional, applied to every recipient in this send
+  bcc         String[]       @default([]) // optional, applied to every recipient in this send
   scheduledAt DateTime?
   status      CampaignStatus @default(sending)
   sentCount   Int            @default(0)
@@ -481,27 +503,74 @@ model EmailCampaign {
 model EmailLog {
   id                String         @id @default(cuid())
   businessId        String
-  campaignId        String?        // null for ad-hoc invoice sends
+  campaignId        String? // null for ad-hoc invoice sends
   customerId        String
   to                String
   subject           String
   status            EmailLogStatus @default(queued)
-  providerMessageId String?        // message ID returned by Resend
+  providerMessageId String? // message ID returned by Resend
   sentAt            DateTime?
-  openedAt          DateTime?      // set by tracking pixel (§11.8)
-  clickedAt         DateTime?      // set by redirect click tracking (§11.8)
-  bouncedAt         DateTime?      // set by Resend webhook (§11.8)
+  openedAt          DateTime? // set by tracking pixel (§11.8)
+  clickedAt         DateTime? // set by redirect click tracking (§11.8)
+  bouncedAt         DateTime? // set by Resend webhook (§11.8)
   createdAt         DateTime       @default(now())
   updatedAt         DateTime       @updatedAt
 
-  business  Business       @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  campaign  EmailCampaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
-  customer  Customer       @relation(fields: [customerId], references: [id])
+  business      Business       @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  campaign      EmailCampaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  customer      Customer       @relation(fields: [customerId], references: [id])
+  replyMessages EmailMessage[]
 
   @@index([businessId])
   @@index([businessId, sentAt])
   @@index([campaignId, status])
   @@index([customerId])
+}
+
+// One Gmail mailbox connected per Business (§11.12). Used ONLY for the
+// two-way 1:1 reply channel — never for bulk/campaign sending (that's Resend).
+model GmailConnection {
+  id             String                @id @default(cuid())
+  businessId     String                @unique
+  emailAddress   String
+  accessToken    String // AES-256-GCM encrypted
+  refreshToken   String // AES-256-GCM encrypted
+  tokenExpiresAt DateTime?
+  historyId      String                @default("") // Gmail incremental sync cursor
+  status         GmailConnectionStatus @default(connected)
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+}
+
+// One row per inbound or outbound message in a Gmail conversation thread (§11.12).
+model EmailMessage {
+  id                String                @id @default(cuid())
+  businessId        String
+  customerId        String? // null = inbound message not yet matched to a Customer
+  direction         EmailMessageDirection
+  gmailMessageId    String                @unique
+  gmailThreadId     String
+  from              String
+  to                String
+  subject           String                @default("")
+  bodyText          String                @default("")
+  bodyHtml          String                @default("")
+  sentAt            DateTime?
+  receivedAt        DateTime?
+  relatedEmailLogId String? // optional link back to the EmailLog this is a reply to
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+
+  business        Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  customer        Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  relatedEmailLog EmailLog? @relation(fields: [relatedEmailLogId], references: [id], onDelete: SetNull)
+
+  @@index([businessId])
+  @@index([customerId])
+  @@index([gmailThreadId])
+  @@index([businessId, customerId])
 }
 
 // ── Ad Campaign models (§12c.3) ──────────────────────────────────────────────
@@ -513,21 +582,21 @@ model Campaign {
   businessId         String
   adAccountId        String
   provider           AdProvider
-  externalCampaignId String     // platform's own campaign ID
+  externalCampaignId String // platform's own campaign ID
   name               String
   objective          String     @default("")
-  status             String     @default("")  // platform status e.g. ACTIVE / PAUSED / DELETED
+  status             String     @default("") // platform status e.g. ACTIVE / PAUSED / DELETED
   // Ad creative text where available (not all campaign types expose this)
-  creativeText       String     @default("")  // primary text / body copy
-  headline           String     @default("")  // ad headline
+  creativeText       String     @default("") // primary text / body copy
+  headline           String     @default("") // ad headline
   startDate          DateTime?
   endDate            DateTime?
-  raw                Json       @default("{}")  // full raw API response for future use
+  raw                Json       @default("{}") // full raw API response for future use
   createdAt          DateTime   @default(now())
   updatedAt          DateTime   @updatedAt
 
-  business     Business               @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  adAccount    AdAccount              @relation(fields: [adAccountId], references: [id], onDelete: Cascade)
+  business     Business              @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  adAccount    AdAccount             @relation(fields: [adAccountId], references: [id], onDelete: Cascade)
   metrics      CampaignMetric[]
   analyses     AdAnalysis[]
   chatMessages AdChatMessage[]
@@ -548,7 +617,7 @@ model CampaignKeyword {
   businessId  String
   campaignId  String
   text        String
-  matchType   String   @default("")  // EXACT / PHRASE / BROAD
+  matchType   String   @default("") // EXACT / PHRASE / BROAD
   status      String   @default("")
   impressions BigInt   @default(0)
   clicks      BigInt   @default(0)
@@ -595,11 +664,11 @@ model CampaignTargeting {
   businessId String
   campaignId String     @unique
   provider   AdProvider
-  ageRanges  Json       @default("[]")  // string[] e.g. ["18-24","25-34"]
-  genders    Json       @default("[]")  // string[] e.g. ["male","female"] or ["all"]
-  locations  Json       @default("[]")  // string[] — names (FB) or raw criterion ids (Google)
-  interests  Json       @default("[]")  // [{ id, name }] — Facebook only
-  languages  Json       @default("[]")  // string[]
+  ageRanges  Json       @default("[]") // string[] e.g. ["18-24","25-34"]
+  genders    Json       @default("[]") // string[] e.g. ["male","female"] or ["all"]
+  locations  Json       @default("[]") // string[] — names (FB) or raw criterion ids (Google)
+  interests  Json       @default("[]") // [{ id, name }] — Facebook only
+  languages  Json       @default("[]") // string[]
   raw        Json       @default("{}")
   createdAt  DateTime   @default(now())
   updatedAt  DateTime   @updatedAt
@@ -616,9 +685,9 @@ model CampaignDemographic {
   id          String   @id @default(cuid())
   businessId  String
   campaignId  String
-  ageRange    String   @default("")  // '' = not broken down by age
-  gender      String   @default("")  // '' = not broken down by gender
-  region      String   @default("")  // '' = not broken down by region
+  ageRange    String   @default("") // '' = not broken down by age
+  gender      String   @default("") // '' = not broken down by gender
+  region      String   @default("") // '' = not broken down by region
   impressions BigInt   @default(0)
   clicks      BigInt   @default(0)
   spend       Decimal? @db.Decimal(14, 4)
@@ -642,13 +711,13 @@ model CampaignMetric {
   date        DateTime // UTC midnight — day-level granularity
   impressions BigInt   @default(0)
   clicks      BigInt   @default(0)
-  ctr         Float?   // fraction 0–1 (e.g. 0.05 = 5 %)
+  ctr         Float? // fraction 0–1 (e.g. 0.05 = 5 %)
   spend       Decimal? @db.Decimal(14, 4)
   conversions Float?
   cpc         Decimal? @db.Decimal(14, 4)
   cpa         Decimal? @db.Decimal(14, 4)
   reach       BigInt?
-  roas        Float?   // return on ad spend = revenue / spend
+  roas        Float? // return on ad spend = revenue / spend
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -669,11 +738,11 @@ model CampaignMetric {
 model AdConnection {
   id             String          @id @default(cuid())
   businessId     String
-  userId         String          // the staff member who logged in — owns the token
+  userId         String // the staff member who logged in — owns the token
   provider       AdProvider
-  accessToken    String          // encrypted; for FB this is the long-lived user token
-  refreshToken   String          @default("")  // encrypted; Google only (FB has no refresh token)
-  tokenExpiresAt DateTime?                     // null = unknown; FB ~60 days, Google ~1 hour
+  accessToken    String // encrypted; for FB this is the long-lived user token
+  refreshToken   String          @default("") // encrypted; Google only (FB has no refresh token)
+  tokenExpiresAt DateTime? // null = unknown; FB ~60 days, Google ~1 hour
   status         AdAccountStatus @default(active)
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
@@ -694,11 +763,11 @@ model AdConnection {
 model AdAccount {
   id                String          @id @default(cuid())
   businessId        String
-  connectionId      String          // which OAuth connection (token) this account/fanpage belongs to
+  connectionId      String // which OAuth connection (token) this account/fanpage belongs to
   provider          AdProvider
-  externalAccountId String          @default("")  // FB act_xxx / Page id, Google customer id
-  accountName       String          @default("")  // human-readable label from the platform
-  status            AdAccountStatus @default(active)  // 'disconnected' = user stopped tracking this one
+  externalAccountId String          @default("") // FB act_xxx / Page id, Google customer id
+  accountName       String          @default("") // human-readable label from the platform
+  status            AdAccountStatus @default(active) // 'disconnected' = user stopped tracking this one
   createdAt         DateTime        @default(now())
   updatedAt         DateTime        @updatedAt
 
@@ -736,9 +805,9 @@ model AdAnalysis {
   createdById         String?
   contentReview       String   @default("")
   performanceAnalysis String   @default("")
-  audienceAnalysis    String   @default("")    // keyword / targeting / customer-segment commentary
-  recommendations     Json     @default("[]")  // string[]
-  model               String   @default("")    // Claude model id used
+  audienceAnalysis    String   @default("") // keyword / targeting / customer-segment commentary
+  recommendations     Json     @default("[]") // string[]
+  model               String   @default("") // Claude model id used
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
@@ -761,7 +830,7 @@ model AdChatMessage {
   campaignId  String
   role        AdChatRole
   content     String
-  createdById String?    // null for assistant messages
+  createdById String? // null for assistant messages
   createdAt   DateTime   @default(now())
 
   business  Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
@@ -780,17 +849,17 @@ model AdChatMessage {
 model AdBatchAnalysis {
   id                  String   @id @default(cuid())
   businessId          String
-  campaignIds         Json     // string[] — the Campaign ids included in this run
+  campaignIds         Json // string[] — the Campaign ids included in this run
   createdById         String?
   contentReview       String   @default("")
   performanceAnalysis String   @default("")
-  audienceAnalysis    String   @default("")    // keyword / targeting / customer-segment commentary
-  recommendations     Json     @default("[]")  // string[]
+  audienceAnalysis    String   @default("") // keyword / targeting / customer-segment commentary
+  recommendations     Json     @default("[]") // string[]
   model               String   @default("")
   createdAt           DateTime @default(now())
 
-  business     Business            @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  createdBy    User?               @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  business     Business             @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  createdBy    User?                @relation(fields: [createdById], references: [id], onDelete: SetNull)
   chatMessages AdBatchChatMessage[]
 
   @@index([businessId])

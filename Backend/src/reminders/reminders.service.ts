@@ -11,6 +11,7 @@ import {
   DEFAULT_RENEWAL_REMINDER_DAYS,
 } from '../businesses/reminder-defaults';
 import { EmailCampaignService } from '../email/email-campaign.service';
+import { GmailService } from '../email/gmail.service';
 
 @Injectable()
 export class RemindersService {
@@ -23,6 +24,7 @@ export class RemindersService {
     private readonly notificationsService: NotificationsService,
     private readonly businessesService: BusinessesService,
     private readonly emailCampaignService: EmailCampaignService,
+    private readonly gmailService: GmailService,
   ) {}
 
   @Cron('0 8 * * *')
@@ -33,6 +35,13 @@ export class RemindersService {
     await this.scanRenewals();
     await this.emailCampaignService.dispatchScheduled();
     this.logger.log('Reminder scan complete');
+  }
+
+  // Reuses the same @nestjs/schedule cron mechanism — no separate scheduler.
+  // Polls every connected business's Gmail inbox for new replies (§11.12 Part 3).
+  @Cron('*/7 * * * *')
+  async pollGmailReplies() {
+    await this.gmailService.pollAll();
   }
 
   async triggerNow() {

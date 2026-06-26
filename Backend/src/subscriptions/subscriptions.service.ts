@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { FollowUpHistoryType, PipelineStage, Prisma, SubscriptionStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { InvoicesService } from '../invoices/invoices.service';
 import { CreateSubscriptionDto } from './dto/create-subscription.dto';
 import { RenewSubscriptionDto } from './dto/renew-subscription.dto';
 import type { RequestUser } from '../common/decorators/current-user.decorator';
@@ -18,7 +19,37 @@ const SUB_INCLUDE = {
 
 @Injectable()
 export class SubscriptionsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly invoicesService: InvoicesService,
+  ) {}
+
+  // Creates a Draft invoice for one period of a service, used when the caller
+  // opts into auto-creating an invoice instead of linking an existing one.
+  private async autoCreateInvoice(
+    user: RequestUser,
+    customerId: string,
+    serviceId: string,
+    serviceName: string,
+    servicePrice: number,
+    startDate: Date,
+    expiryDate: Date,
+  ) {
+    const fmt = (d: Date) => d.toISOString().slice(0, 10);
+    const invoice = await this.invoicesService.create(user, {
+      customerId,
+      lineItems: [
+        {
+          serviceId,
+          description: serviceName,
+          serviceTerm: `${fmt(startDate)} - ${fmt(expiryDate)}`,
+          quantity: 1,
+          rate: servicePrice,
+        },
+      ],
+    });
+    return invoice.id;
+  }
 
   // ---------------------------------------------------------------------------
   // Access-control helpers
@@ -64,6 +95,15 @@ export class SubscriptionsService {
 
     const now = new Date();
     const expiryDate = new Date(dto.expiryDate);
+    const startDate = dto.startDate ? new Date(dto.startDate) : now;
+    const servicePrice = dto.servicePrice ?? Number(service.price);
+
+    let invoiceId = dto.invoiceId ?? null;
+    if (!invoiceId && dto.createInvoice) {
+      invoiceId = await this.autoCreateInvoice(
+        user, customer.id, service.id, service.name, servicePrice, startDate, expiryDate,
+      );
+    }
 
     return this.prisma.$transaction(async (tx) => {
       const sub = await tx.subscription.create({
@@ -71,10 +111,10 @@ export class SubscriptionsService {
           businessId: user.businessId,
           customerId: customer.id,
           serviceId: service.id,
-          servicePrice: dto.servicePrice ?? service.price,
-          invoiceId: dto.invoiceId ?? null,
+          servicePrice,
+          invoiceId,
           closingDate: dto.closingDate ? new Date(dto.closingDate) : now,
-          startDate:   dto.startDate   ? new Date(dto.startDate)   : now,
+          startDate,
           expiryDate,
           status: SubscriptionStatus.Active,
           nextReminderAt: this.daysBeforeExpiry(expiryDate, 5),
@@ -160,14 +200,25 @@ export class SubscriptionsService {
     }
 
     const newExpiry = new Date(dto.expiryDate);
+    const newStart  = dto.startDate ? new Date(dto.startDate) : new Date();
+    const servicePrice = dto.servicePrice ?? Number(sub.servicePrice);
+
+    let invoiceId = dto.invoiceId;
+    if (!invoiceId && dto.createInvoice) {
+      const service = await this.prisma.service.findUnique({ where: { id: sub.serviceId } });
+      invoiceId = await this.autoCreateInvoice(
+        user, sub.customerId, sub.serviceId, service?.name ?? 'Service renewal',
+        servicePrice, newStart, newExpiry,
+      );
+    }
 
     return this.prisma.subscription.update({
       where: { id },
       data: {
         status: SubscriptionStatus.Renewed,
         expiryDate: newExpiry,
-        startDate: dto.startDate ? new Date(dto.startDate) : new Date(),
-        ...(dto.invoiceId      !== undefined && { invoiceId: dto.invoiceId }),
+        startDate: newStart,
+        ...(invoiceId          !== undefined && { invoiceId }),
         ...(dto.servicePrice   !== undefined && { servicePrice: dto.servicePrice }),
         ...(dto.note           !== undefined && { note: dto.note }),
         reminderStep: 0,

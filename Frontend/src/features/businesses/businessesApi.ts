@@ -33,24 +33,6 @@ export interface UpdateBrandingPayload {
   currentInvoiceNumber?: string;
 }
 
-export interface SmtpSettings {
-  smtpHost: string;
-  smtpPort: number;
-  smtpSecure: boolean;
-  smtpUser: string;
-  smtpFromName: string;
-  configured: boolean;
-}
-
-export interface UpdateSmtpSettingsPayload {
-  host: string;
-  port: number;
-  secure: boolean;
-  user: string;
-  password: string;
-  fromName?: string;
-}
-
 const d = <T>(res: { data: T }) => res.data;
 
 export const businessesApi = {
@@ -65,19 +47,6 @@ export const businessesApi = {
 
   setClaudeApiKey: (apiKey: string) =>
     api.patch<{ message: string }>('/businesses/settings/claude-api-key', { apiKey }).then(d<{ message: string }>),
-
-  getSmtpSettings: () =>
-    api.get<SmtpSettings>('/businesses/settings/email').then(d<SmtpSettings>),
-
-  setSmtpSettings: (payload: UpdateSmtpSettingsPayload) =>
-    api
-      .patch<{ data: SmtpSettings; message: string }>('/businesses/settings/email', payload)
-      .then(d<{ data: SmtpSettings; message: string }>),
-
-  clearSmtpSettings: () =>
-    api
-      .delete<{ data: SmtpSettings; message: string }>('/businesses/settings/email')
-      .then(d<{ data: SmtpSettings; message: string }>),
 
   uploadLogo: (file: File) => {
     const form = new FormData();

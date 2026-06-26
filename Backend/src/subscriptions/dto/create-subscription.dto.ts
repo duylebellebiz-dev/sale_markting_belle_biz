@@ -1,4 +1,5 @@
 import {
+  IsBoolean,
   IsDateString,
   IsNumber,
   IsOptional,
@@ -16,6 +17,13 @@ export class CreateSubscriptionDto {
   @IsOptional()
   @IsString()
   invoiceId?: string;
+
+  // When true (and invoiceId is not set), a Draft invoice for this service is
+  // created automatically and linked, instead of requiring a separate trip
+  // to the Invoices module first.
+  @IsOptional()
+  @IsBoolean()
+  createInvoice?: boolean;
 
   @IsOptional()
   @IsDateString()

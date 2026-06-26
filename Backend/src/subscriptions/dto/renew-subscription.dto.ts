@@ -1,4 +1,5 @@
 import {
+  IsBoolean,
   IsDateString,
   IsNumber,
   IsOptional,
@@ -17,6 +18,12 @@ export class RenewSubscriptionDto {
   @IsOptional()
   @IsString()
   invoiceId?: string;
+
+  // When true (and invoiceId is not set), a Draft invoice for the new period
+  // is created automatically and linked.
+  @IsOptional()
+  @IsBoolean()
+  createInvoice?: boolean;
 
   @IsOptional()
   @IsNumber()

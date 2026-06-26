@@ -2,7 +2,7 @@ import { Injectable, NotFoundException, UnprocessableEntityException } from '@ne
 import { PrismaService } from '../prisma/prisma.service';
 import { UpdateReminderScheduleDto } from './dto/update-reminder-schedule.dto';
 import { UpdateBrandingDto } from './dto/update-branding.dto';
-import { UpdateSmtpSettingsDto } from './dto/update-smtp-settings.dto';
+import { UpdateResendSettingsDto } from './dto/update-resend-settings.dto';
 import { encrypt, decrypt } from '../common/crypto';
 
 // Reusable select that strips the password hash from every Business response
@@ -190,28 +190,29 @@ export class BusinessesService {
     return { configured: !!business.claudeApiKey };
   }
 
-  // ── Per-business SMTP settings (send emails from the business's own mailbox) ─
 
-  /** Returns the configured SMTP settings, minus the password, for the settings UI. */
-  async getSmtpSettings(businessId: string) {
+  // ── Per-business Resend settings ─────────────────────────────────────────────
+  // Each business registers its OWN Resend account (own quota, own verified domain)
+  // instead of sharing the operator's RESEND_API_KEY / RESEND_FROM_EMAIL.
+
+  /** Returns whether a business-owned Resend key is configured, plus the public sender fields. */
+  async getResendSettings(businessId: string) {
     const business = await this.prisma.business.findUnique({
       where: { id: businessId },
-      select: {
-        smtpHost: true,
-        smtpPort: true,
-        smtpSecure: true,
-        smtpUser: true,
-        smtpFromName: true,
-      },
+      select: { resendApiKey: true, resendFromEmail: true, resendFromName: true },
     });
     if (!business) throw new NotFoundException('Business not found');
-    return { ...business, configured: !!business.smtpHost };
+    return {
+      configured: !!business.resendApiKey,
+      fromEmail: business.resendFromEmail,
+      fromName: business.resendFromName,
+    };
   }
 
-  async setSmtpSettings(businessId: string, dto: UpdateSmtpSettingsDto) {
-    let encryptedPassword: string;
+  async setResendSettings(businessId: string, dto: UpdateResendSettingsDto) {
+    let encryptedKey: string;
     try {
-      encryptedPassword = encrypt(dto.password);
+      encryptedKey = encrypt(dto.apiKey);
     } catch {
       throw new UnprocessableEntityException(
         'Encryption is misconfigured on the server. Ensure CLAUDE_API_ENCRYPTION_SECRET is set.',
@@ -220,31 +221,21 @@ export class BusinessesService {
     await this.prisma.business.update({
       where: { id: businessId },
       data: {
-        smtpHost: dto.host,
-        smtpPort: dto.port,
-        smtpSecure: dto.secure,
-        smtpUser: dto.user,
-        smtpPassword: encryptedPassword,
-        smtpFromName: dto.fromName ?? '',
+        resendApiKey: encryptedKey,
+        resendFromEmail: dto.fromEmail,
+        resendFromName: dto.fromName ?? '',
       },
     });
-    return this.getSmtpSettings(businessId);
+    return this.getResendSettings(businessId);
   }
 
-  /** Clears the SMTP config so sends fall back to the shared Resend sender. */
-  async clearSmtpSettings(businessId: string) {
+  /** Clears the business's own Resend config so sends fall back to the shared operator account. */
+  async clearResendSettings(businessId: string) {
     await this.prisma.business.update({
       where: { id: businessId },
-      data: {
-        smtpHost: '',
-        smtpPort: 587,
-        smtpSecure: false,
-        smtpUser: '',
-        smtpPassword: '',
-        smtpFromName: '',
-      },
+      data: { resendApiKey: '', resendFromEmail: '', resendFromName: '' },
     });
-    return this.getSmtpSettings(businessId);
+    return this.getResendSettings(businessId);
   }
 
   async updateLogo(businessId: string, logoUrl: string) {

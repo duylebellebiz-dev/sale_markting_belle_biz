@@ -13,9 +13,12 @@ export default function Sidebar() {
     <aside className="hidden md:flex flex-col w-60 shrink-0 bg-gray-900 text-gray-100 min-h-screen">
       {/* Brand + bell */}
       <div className="flex items-center justify-between px-5 py-5 border-b border-gray-700">
-        <div>
-          <span className="text-lg font-bold tracking-tight text-white">SaleSupport</span>
-          <p className="text-xs text-gray-400 mt-0.5 capitalize">{user.role}</p>
+        <div className="flex items-center gap-2">
+          <img src="/logo.jpg" alt="Belle Biz" className="w-8 h-8 rounded-full object-cover" />
+          <div>
+            <span className="text-lg font-bold tracking-tight text-white">SaleSupport</span>
+            <p className="text-xs text-gray-400 mt-0.5 capitalize">{user.role}</p>
+          </div>
         </div>
         {/* Bell sits outside nav links so dropdown isn't clipped by overflow-y-auto */}
         <div className="text-gray-300">

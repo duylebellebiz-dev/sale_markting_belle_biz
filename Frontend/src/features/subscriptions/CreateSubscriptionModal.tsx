@@ -4,22 +4,27 @@ import CustomerSearchPicker, { type PickedCustomer } from '../customers/Customer
 import type { CreateSubscriptionPayload } from './subscriptionsApi';
 
 interface Service  { id: string; name: string; price: number; isActive: boolean; }
-interface Invoice  { id: string; invoiceNumber: string; total?: number; }
+interface InvoiceLineItem { serviceId?: string | null; description: string; rate: number; }
+interface Invoice  { id: string; invoiceNumber: string; total?: number; lineItems?: InvoiceLineItem[]; }
 
 interface Props {
   onSubmit: (payload: CreateSubscriptionPayload) => Promise<void>;
   onClose: () => void;
+  /** Pre-select customer + invoice, e.g. opened from the "Subscribe" action on a paid invoice. */
+  presetCustomer?: PickedCustomer;
+  presetInvoiceId?: string;
 }
 
 const INPUT = 'w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500';
 
-export default function CreateSubscriptionModal({ onSubmit, onClose }: Props) {
+export default function CreateSubscriptionModal({ onSubmit, onClose, presetCustomer, presetInvoiceId }: Props) {
   const [services,  setServices]  = useState<Service[]>([]);
   const [invoices,  setInvoices]  = useState<Invoice[]>([]);
 
-  const [customer,      setCustomer]      = useState<PickedCustomer | null>(null);
+  const [customer,      setCustomer]      = useState<PickedCustomer | null>(presetCustomer ?? null);
   const [serviceId,     setServiceId]     = useState('');
   const [invoiceId,     setInvoiceId]     = useState('');
+  const [createInvoice, setCreateInvoice] = useState(true);
   const [servicePrice,  setServicePrice]  = useState('');
   const [expiryDate,    setExpiryDate]    = useState('');
   const [startDate,     setStartDate]     = useState('');
@@ -61,6 +66,16 @@ export default function CreateSubscriptionModal({ onSubmit, onClose }: Props) {
     if (svc) setServicePrice(String(svc.price));
   }, [serviceId, services]);
 
+  function handleInvoiceChange(id: string) {
+    setInvoiceId(id);
+    const inv = invoices.find((i) => i.id === id);
+    const lineItem = inv?.lineItems?.find((li) => li.serviceId);
+    if (lineItem?.serviceId) {
+      setServiceId(lineItem.serviceId);
+      setServicePrice(String(lineItem.rate));
+    }
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
@@ -70,14 +85,15 @@ export default function CreateSubscriptionModal({ onSubmit, onClose }: Props) {
     setSubmitting(true);
     try {
       await onSubmit({
-        customerId:   customer.id,
+        customerId:    customer.id,
         serviceId,
-        invoiceId:    invoiceId    || undefined,
-        closingDate:  closingDate  || undefined,
-        startDate:    startDate    || undefined,
+        invoiceId:     invoiceId    || undefined,
+        createInvoice: !invoiceId && createInvoice,
+        closingDate:   closingDate  || undefined,
+        startDate:     startDate    || undefined,
         expiryDate,
-        servicePrice: servicePrice ? parseFloat(servicePrice) : undefined,
-        note:         note         || undefined,
+        servicePrice:  servicePrice ? parseFloat(servicePrice) : undefined,
+        note:          note         || undefined,
       });
       onClose();
     } catch (err: unknown) {
@@ -152,17 +168,28 @@ export default function CreateSubscriptionModal({ onSubmit, onClose }: Props) {
             <Field label="Link Invoice">
               <select
                 value={invoiceId}
-                onChange={(e) => setInvoiceId(e.target.value)}
+                onChange={(e) => handleInvoiceChange(e.target.value)}
                 className={INPUT}
-                disabled={!customer}
+                disabled={!customer || createInvoice}
               >
                 <option value="">{customer ? '- Optional -' : '- Select customer first -'}</option>
                 {invoices.map((inv) => (
                   <option key={inv.id} value={inv.id}>
-                    #{inv.invoiceNumber} (${(inv.total ?? 0).toFixed(2)})
+                    #{inv.invoiceNumber} (${Number(inv.total ?? 0).toFixed(2)})
                   </option>
                 ))}
               </select>
+              {!invoiceId && (
+                <label className="mt-2 flex items-center gap-2 text-xs text-gray-600">
+                  <input
+                    type="checkbox"
+                    checked={createInvoice}
+                    onChange={(e) => setCreateInvoice(e.target.checked)}
+                    className="rounded border-gray-300"
+                  />
+                  Auto-create a Draft invoice for this service
+                </label>
+              )}
             </Field>
 
             <Field label="Start Date">
