@@ -23,7 +23,7 @@ export default function CreateSubscriptionModal({ onSubmit, onClose, presetCusto
 
   const [customer,      setCustomer]      = useState<PickedCustomer | null>(presetCustomer ?? null);
   const [serviceId,     setServiceId]     = useState('');
-  const [invoiceId,     setInvoiceId]     = useState('');
+  const [invoiceId,     setInvoiceId]     = useState(presetInvoiceId ?? '');
   const [createInvoice, setCreateInvoice] = useState(true);
   const [servicePrice,  setServicePrice]  = useState('');
   const [expiryDate,    setExpiryDate]    = useState('');
