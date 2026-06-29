@@ -119,12 +119,16 @@ export class AdChatService {
     status: string;
     headline: string;
     creativeText: string;
+    creativeImageUrl: string;
+    conversationTemplate: string;
+    dailyBudget: import('@prisma/client').Prisma.Decimal | null;
+    lifetimeBudget: import('@prisma/client').Prisma.Decimal | null;
     startDate: Date | null;
     endDate: Date | null;
     adAccount: { provider: string; accountName: string };
     keywords: Array<{ text: string; matchType: string; impressions: bigint; clicks: bigint; spend: import('@prisma/client').Prisma.Decimal | null; ctr: number | null }>;
     searchTerms: Array<{ term: string; impressions: bigint; clicks: bigint; spend: import('@prisma/client').Prisma.Decimal | null }>;
-    targeting: { ageRanges: unknown; genders: unknown; locations: unknown; interests: unknown; languages: unknown } | null;
+    targeting: { ageRanges: unknown; minAge: number | null; maxAge: number | null; genders: unknown; locations: unknown; interests: unknown; languages: unknown; placements: unknown; narrowAudience: unknown } | null;
     demographics: Array<{ ageRange: string; gender: string; region: string; impressions: bigint; clicks: bigint; spend: import('@prisma/client').Prisma.Decimal | null; conversions: number | null }>;
   }): string {
     return [
@@ -143,6 +147,10 @@ export class AdChatService {
       `- Status: ${campaign.status || 'unspecified'}`,
       `- Current headline: ${campaign.headline || '(none provided)'}`,
       `- Current body/creative text: ${campaign.creativeText || '(none provided)'}`,
+      `- Image/reel used: ${campaign.creativeImageUrl || '(none provided)'}`,
+      `- Conversation (Messenger/WhatsApp) template: ${campaign.conversationTemplate || '(not used)'}`,
+      `- Daily budget: ${campaign.dailyBudget != null ? campaign.dailyBudget.toString() : '(not set / set at adset level only)'}`,
+      `- Lifetime budget: ${campaign.lifetimeBudget != null ? campaign.lifetimeBudget.toString() : '(not set)'}`,
       `- Date range: ${campaign.startDate?.toISOString().slice(0, 10) ?? '?'} to ${campaign.endDate?.toISOString().slice(0, 10) ?? 'ongoing'}`,
       '',
       'Audience / keyword data:',

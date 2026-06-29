@@ -254,7 +254,7 @@ function sanitizeFilenamePart(value?: string | null): string {
 
 function buildInvoicePdfFilename(inv: any): string {
   const datePart = compactDateForFilename(inv.invoiceDate);
-  const invoicePart = sanitizeFilenamePart(inv.invoiceNumber || 'invoice');
+  const invoicePart = sanitizeFilenamePart(inv.invoiceNumber || 'invoice').replace(/-/g, '');
   const namePart = sanitizeFilenamePart(
     inv.billTo?.name || inv.customer?.shopName || inv.customer?.customerName || 'Customer',
   );

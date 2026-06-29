@@ -22,6 +22,25 @@ const INCREMENTAL_DEFAULT_DAYS = 30;
 const PAGE_DELAY_MS = 120; // gentle pause between paginated requests
 const RETRY_AFTER_MS = 62_000; // wait > 60 s on 429, then retry once
 
+export type AdStatusFilter = 'active_paused' | 'all';
+
+export interface SyncOptions {
+  statusFilter?: AdStatusFilter;
+  dateFrom?: Date;
+  dateTo?: Date;
+  /** Cap on how many campaigns (most recently created first) to process this run. */
+  limit?: number;
+}
+
+/**
+ * Thrown when FB still reports a rate limit after the single retry-with-backoff in
+ * jsonFetch — meaning the account's quota is exhausted for a sustained period, not a
+ * one-off blip. Retrying again immediately would just burn another 62 s per request
+ * for nothing. Callers use this to stop the whole sync run early instead of grinding
+ * through every remaining campaign one doomed retry at a time.
+ */
+class FbRateLimitExceededError extends Error {}
+
 // ── Types for internal use ──────────────────────────────────────────────────
 
 interface NormalizedCampaign {
@@ -31,6 +50,10 @@ interface NormalizedCampaign {
   status: string;
   headline: string;       // ad creative headline, when the platform exposes one
   creativeText: string;   // primary text / body copy
+  creativeImageUrl: string;     // thumbnail of the image/reel used in the ad post
+  conversationTemplate: string; // Click-to-Messenger/WhatsApp template text, when used
+  dailyBudget: number | null;
+  lifetimeBudget: number | null;
   startDate: Date | null;
   endDate: Date | null;
   raw: object;
@@ -47,6 +70,7 @@ interface NormalizedMetric {
   cpa: string | null;
   reach: bigint | null;
   roas: number | null;
+  landingPageViews: bigint | null; // pixel-attributed website traffic
 }
 
 // ── Service ─────────────────────────────────────────────────────────────────
@@ -63,8 +87,21 @@ export class AdSyncService {
   /**
    * Syncs campaigns + metrics for a given AdAccount.
    * Returns a summary: { campaignsUpserted, metricsUpserted, dateFrom, dateTo }.
+   *
+   * `options.statusFilter` ('active_paused' | 'all', default 'active_paused') limits which
+   * campaigns are even fetched from the provider — most ad accounts accumulate many old
+   * ended/deleted campaigns that no longer need a creative/targeting/demographic refetch
+   * on every sync. `options.dateFrom`/`dateTo` overrides the incremental window with an
+   * explicit reporting period (e.g. "this month") instead of always pulling the last
+   * synced day onward — both cut the number of campaigns and insight rows fetched per run.
    */
-  async sync(adAccountId: string, businessId: string, userId: string, isOwner: boolean) {
+  async sync(
+    adAccountId: string,
+    businessId: string,
+    userId: string,
+    isOwner: boolean,
+    options?: SyncOptions,
+  ) {
     const canAccess = await this.oauthService.canAccessAccount(adAccountId, businessId, userId, isOwner);
     if (!canAccess) throw new NotFoundException('Ad account not found');
 
@@ -77,23 +114,29 @@ export class AdSyncService {
     }
 
     const accessToken = await this.oauthService.getValidAccessToken(adAccount.connectionId);
+    const statusFilter = options?.statusFilter ?? 'active_paused';
+    const limit = options?.limit && options.limit > 0 ? Math.floor(options.limit) : undefined;
 
-    // Determine incremental date window
-    const { dateFrom, dateTo } = await this.getDateWindow(adAccountId);
+    // Explicit period (e.g. "this month") overrides the incremental window.
+    const { dateFrom, dateTo } = options?.dateFrom && options?.dateTo
+      ? { dateFrom: utcMidnight(options.dateFrom), dateTo: utcMidnight(options.dateTo) }
+      : await this.getDateWindow(adAccountId);
 
     this.logger.log(
-      `Syncing ${adAccount.provider} adAccount ${adAccountId} from ${dateFrom.toISOString().slice(0, 10)} to ${dateTo.toISOString().slice(0, 10)}`,
+      `Syncing ${adAccount.provider} adAccount ${adAccountId} from ${dateFrom.toISOString().slice(0, 10)} to ${dateTo.toISOString().slice(0, 10)} (status filter: ${statusFilter}, limit: ${limit ?? 'none'})`,
     );
 
     let campaignsUpserted = 0;
     let metricsUpserted = 0;
+    let rateLimited = false;
 
     if (adAccount.provider === 'facebook') {
-      const result = await this.syncFacebook(adAccount, accessToken, dateFrom, dateTo);
+      const result = await this.syncFacebook(adAccount, accessToken, dateFrom, dateTo, statusFilter, limit);
       campaignsUpserted = result.campaignsUpserted;
       metricsUpserted = result.metricsUpserted;
+      rateLimited = result.rateLimited;
     } else {
-      const result = await this.syncGoogle(adAccount, accessToken, dateFrom, dateTo);
+      const result = await this.syncGoogle(adAccount, accessToken, dateFrom, dateTo, statusFilter, limit);
       campaignsUpserted = result.campaignsUpserted;
       metricsUpserted = result.metricsUpserted;
     }
@@ -103,6 +146,10 @@ export class AdSyncService {
       metricsUpserted,
       dateFrom: dateFrom.toISOString().slice(0, 10),
       dateTo: dateTo.toISOString().slice(0, 10),
+      rateLimited,
+      message: rateLimited
+        ? `Facebook rate limit reached — synced ${campaignsUpserted} campaign(s) before stopping. Wait 15–30 minutes and sync again to pick up the rest.`
+        : undefined,
     };
   }
 
@@ -120,6 +167,7 @@ export class AdSyncService {
     adAccountId?: string,
     dateFrom?: Date,
     dateTo?: Date,
+    limit?: number,
   ) {
     const visibleIds = await this.oauthService.visibleAdAccountIds(businessId, userId, isOwner);
     if (visibleIds && adAccountId && !visibleIds.includes(adAccountId)) {
@@ -142,6 +190,9 @@ export class AdSyncService {
         },
       },
       orderBy: { updatedAt: 'desc' },
+      // Mirrors the sync-time "newest N campaigns" cap so the page shows the same set
+      // that was just synced, instead of every campaign ever stored for this account.
+      ...(limit ? { take: limit } : {}),
     });
     return campaigns;
   }
@@ -195,6 +246,8 @@ export class AdSyncService {
     accessToken: string,
     dateFrom: Date,
     dateTo: Date,
+    statusFilter: AdStatusFilter,
+    limit?: number,
   ) {
     let campaignsUpserted = 0;
     let metricsUpserted = 0;
@@ -202,41 +255,96 @@ export class AdSyncService {
     // Resolve the ad account ID (act_XXXXXXXXX)
     const fbAdAccountId = await this.resolveFbAdAccountId(adAccount, accessToken);
 
-    // Fetch all campaigns under this ad account (paginated)
-    const campaigns = await this.fbFetchAllPages<FbCampaign>(
+    // Fetch campaigns under this ad account (paginated). By default skip ARCHIVED/DELETED
+    // campaigns — they generate no new data and just waste requests on every sync.
+    const allCampaigns = await this.fbFetchAllPages<FbCampaign>(
       `${FB_API}/${fbAdAccountId}/campaigns`,
       {
-        fields: 'id,name,objective,status,start_time,stop_time',
+        fields: 'id,name,objective,status,effective_status,start_time,stop_time,daily_budget,lifetime_budget,created_time',
+        ...(statusFilter === 'active_paused'
+          ? { effective_status: JSON.stringify(['ACTIVE', 'PAUSED']) }
+          : {}),
         access_token: accessToken,
         limit: '100',
       },
     );
 
+    // Listing campaigns is cheap (1-2 paginated requests total); the expensive part is
+    // the 4-5 requests/campaign that follow. So fetch the full list first, then only
+    // process the N most recently created ones when a limit is set — this is what
+    // actually cuts request volume and avoids tripping the rate limit again.
+    const sorted = [...allCampaigns].sort((a, b) => {
+      const at = a.created_time ? new Date(a.created_time).getTime() : 0;
+      const bt = b.created_time ? new Date(b.created_time).getTime() : 0;
+      return bt - at;
+    });
+    const campaigns = limit ? sorted.slice(0, limit) : sorted;
+
+    let rateLimited = false;
+
     for (const fbCamp of campaigns) {
-      const { headline, creativeText } = await this.fetchFbCampaignCreative(fbCamp.id, accessToken);
-
-      const norm: NormalizedCampaign = {
-        externalCampaignId: fbCamp.id,
-        name: fbCamp.name,
-        objective: fbCamp.objective ?? '',
-        status: fbCamp.status ?? '',
-        headline,
-        creativeText,
-        startDate: fbCamp.start_time ? new Date(fbCamp.start_time) : null,
-        endDate: fbCamp.stop_time ? new Date(fbCamp.stop_time) : null,
-        raw: fbCamp as object,
-      };
-
-      const campaign = await this.upsertCampaign(adAccount, norm);
-      campaignsUpserted++;
-
-      // Fetch daily insights for this campaign in the date window
-      const since = dateFrom.toISOString().slice(0, 10);
-      const until = dateTo.toISOString().slice(0, 10);
-
-      let insights: FbInsightRow[] = [];
       try {
-        insights = await this.fbFetchAllPages<FbInsightRow>(
+        // A campaign that ended before the requested window can have no new insights —
+        // skip creative/budget/targeting/demographic refetch entirely and just keep its
+        // existing stored data, updating only name/status. Saves ~4 requests/campaign.
+        const endedBeforeWindow = !!fbCamp.stop_time && new Date(fbCamp.stop_time) < dateFrom;
+        if (endedBeforeWindow) {
+          await this.upsertCampaign(adAccount, {
+            externalCampaignId: fbCamp.id,
+            name: fbCamp.name,
+            objective: fbCamp.objective ?? '',
+            status: fbCamp.status ?? '',
+            headline: '',
+            creativeText: '',
+            creativeImageUrl: '',
+            conversationTemplate: '',
+            dailyBudget: null,
+            lifetimeBudget: null,
+            startDate: fbCamp.start_time ? new Date(fbCamp.start_time) : null,
+            endDate: new Date(fbCamp.stop_time!),
+            raw: fbCamp as object,
+          });
+          campaignsUpserted++;
+          continue;
+        }
+
+        const { headline, creativeText, creativeImageUrl, conversationTemplate } =
+          await this.fetchFbCampaignCreative(fbCamp.id, accessToken);
+        // One combined adset fetch covers both budget fallback and targeting — avoids a
+        // second adset call later (which was doubling requests per campaign and tripping
+        // FB's per-user rate limit).
+        const adsetSnapshot = await this.fetchFbAdsetSnapshot(fbCamp.id, accessToken);
+        const dailyBudget = fbCamp.daily_budget
+          ? parseInt(fbCamp.daily_budget, 10) / 100
+          : adsetSnapshot?.daily_budget ? parseInt(adsetSnapshot.daily_budget, 10) / 100 : null;
+        const lifetimeBudget = fbCamp.lifetime_budget
+          ? parseInt(fbCamp.lifetime_budget, 10) / 100
+          : adsetSnapshot?.lifetime_budget ? parseInt(adsetSnapshot.lifetime_budget, 10) / 100 : null;
+
+        const norm: NormalizedCampaign = {
+          externalCampaignId: fbCamp.id,
+          name: fbCamp.name,
+          objective: fbCamp.objective ?? '',
+          status: fbCamp.status ?? '',
+          headline,
+          creativeText,
+          creativeImageUrl,
+          conversationTemplate,
+          dailyBudget,
+          lifetimeBudget,
+          startDate: fbCamp.start_time ? new Date(fbCamp.start_time) : null,
+          endDate: fbCamp.stop_time ? new Date(fbCamp.stop_time) : null,
+          raw: fbCamp as object,
+        };
+
+        const campaign = await this.upsertCampaign(adAccount, norm);
+        campaignsUpserted++;
+
+        // Fetch daily insights for this campaign in the date window
+        const since = dateFrom.toISOString().slice(0, 10);
+        const until = dateTo.toISOString().slice(0, 10);
+
+        const insights = await this.fbFetchAllPages<FbInsightRow>(
           `${FB_API}/${fbCamp.id}/insights`,
           {
             fields: 'impressions,reach,clicks,ctr,spend,actions,action_values,cost_per_action_type,cpc,date_start,date_stop',
@@ -246,41 +354,64 @@ export class AdSyncService {
             limit: '100',
           },
         );
+
+        for (const row of insights) {
+          const m = this.normalizeFbInsight(row);
+          await this.upsertMetric(campaign.id, m);
+          metricsUpserted++;
+        }
+
+        if (adsetSnapshot?.targeting) {
+          await this.upsertFbTargeting(campaign.id, adAccount.businessId, adsetSnapshot.targeting);
+        }
+        await delay(PAGE_DELAY_MS);
+
+        await this.syncFbDemographics(campaign.id, adAccount.businessId, fbCamp.id, accessToken, since, until);
+
+        await delay(PAGE_DELAY_MS);
       } catch (err) {
-        this.logger.warn(`Failed to fetch insights for FB campaign ${fbCamp.id}: ${err}`);
-        continue;
+        if (err instanceof FbRateLimitExceededError) {
+          // Sustained quota exhaustion — stop the whole run rather than burning a
+          // 62 s wait-then-fail cycle on every remaining campaign in this account.
+          this.logger.warn(
+            `FB rate limit still in effect after retry — stopping sync early. Synced ${campaignsUpserted} campaign(s) before this; re-run later to pick up the rest.`,
+          );
+          rateLimited = true;
+          break;
+        }
+        this.logger.warn(`Failed to sync FB campaign ${fbCamp.id}: ${err}`);
       }
-
-      for (const row of insights) {
-        const m = this.normalizeFbInsight(row);
-        await this.upsertMetric(campaign.id, m);
-        metricsUpserted++;
-      }
-
-      await this.syncFbTargetingAndDemographics(campaign.id, adAccount.businessId, fbCamp.id, accessToken, since, until);
-
-      await delay(PAGE_DELAY_MS);
     }
 
-    return { campaignsUpserted, metricsUpserted };
+    return { campaignsUpserted, metricsUpserted, rateLimited };
   }
 
-  /** Audience targeting (from the campaign's adsets) + age/gender/country performance breakdown. */
-  private async syncFbTargetingAndDemographics(
-    campaignId: string,
-    businessId: string,
+  /** Single adset fetch covering both budget fallback and targeting — one request, not two. */
+  private async fetchFbAdsetSnapshot(
     fbCampaignId: string,
     accessToken: string,
-    since: string,
-    until: string,
+  ): Promise<{ targeting?: FbAdset['targeting']; daily_budget?: string; lifetime_budget?: string } | null> {
+    try {
+      const adsets = await this.fbGet<{ data: Array<FbAdset & { daily_budget?: string; lifetime_budget?: string }> }>(
+        `${FB_API}/${fbCampaignId}/adsets`,
+        { fields: 'targeting,daily_budget,lifetime_budget', limit: '1', access_token: accessToken },
+      );
+      return adsets.data[0] ?? null;
+    } catch (err) {
+      if (err instanceof FbRateLimitExceededError) throw err;
+      this.logger.warn(`Failed to fetch adset snapshot for FB campaign ${fbCampaignId}: ${err}`);
+      return null;
+    }
+  }
+
+  /** Persists audience targeting from an already-fetched adset — no extra API call. */
+  private async upsertFbTargeting(
+    campaignId: string,
+    businessId: string,
+    targeting: NonNullable<FbAdset['targeting']>,
   ) {
     try {
-      const adsets = await this.fbGet<{ data: FbAdset[] }>(
-        `${FB_API}/${fbCampaignId}/adsets`,
-        { fields: 'targeting', limit: '1', access_token: accessToken },
-      );
-      const targeting = adsets.data[0]?.targeting;
-      if (targeting) {
+      {
         const ageRanges = targeting.age_min || targeting.age_max
           ? [`${targeting.age_min ?? 13}-${targeting.age_max ?? 65}`]
           : [];
@@ -288,9 +419,18 @@ export class AdSyncService {
         const locations = (targeting.geo_locations?.countries ?? [])
           .concat((targeting.geo_locations?.cities ?? []).map((c) => c.name).filter(Boolean) as string[])
           .concat((targeting.geo_locations?.regions ?? []).map((r) => r.name).filter(Boolean) as string[]);
-        const interests = (targeting.flexible_spec ?? [])
-          .flatMap((spec) => spec.interests ?? [])
-          .map((i) => ({ id: i.id, name: i.name }));
+        // First flexible_spec group is the base "Detailed Targeting" set; any further
+        // groups are AND-narrowed against it — i.e. Facebook's "Narrow Audience" feature.
+        const specGroups = targeting.flexible_spec ?? [];
+        const interests = (specGroups[0]?.interests ?? []).map((i) => ({ id: i.id, name: i.name }));
+        const narrowAudience = specGroups.slice(1).map((spec) => ({
+          interests: (spec.interests ?? []).map((i) => ({ id: i.id, name: i.name })),
+        }));
+        const languages = (targeting.locales ?? []).map(String);
+        const placements = (targeting.publisher_platforms ?? [])
+          .concat(targeting.facebook_positions ?? [])
+          .concat(targeting.instagram_positions ?? [])
+          .concat(targeting.device_platforms ?? []);
 
         await this.prisma.campaignTargeting.upsert({
           where: { campaignId },
@@ -299,74 +439,117 @@ export class AdSyncService {
             campaignId,
             provider: 'facebook',
             ageRanges: ageRanges as Prisma.InputJsonValue,
+            minAge: targeting.age_min ?? null,
+            maxAge: targeting.age_max ?? null,
             genders: genders as Prisma.InputJsonValue,
             locations: locations as Prisma.InputJsonValue,
             interests: interests as Prisma.InputJsonValue,
-            languages: [] as Prisma.InputJsonValue,
+            languages: languages as Prisma.InputJsonValue,
+            placements: placements as Prisma.InputJsonValue,
+            narrowAudience: narrowAudience as Prisma.InputJsonValue,
             raw: targeting as Prisma.InputJsonValue,
           },
           update: {
             ageRanges: ageRanges as Prisma.InputJsonValue,
+            minAge: targeting.age_min ?? null,
+            maxAge: targeting.age_max ?? null,
             genders: genders as Prisma.InputJsonValue,
             locations: locations as Prisma.InputJsonValue,
             interests: interests as Prisma.InputJsonValue,
+            languages: languages as Prisma.InputJsonValue,
+            placements: placements as Prisma.InputJsonValue,
+            narrowAudience: narrowAudience as Prisma.InputJsonValue,
             raw: targeting as Prisma.InputJsonValue,
           },
         });
       }
     } catch (err) {
-      this.logger.warn(`Failed to fetch FB targeting for campaign ${fbCampaignId}: ${err}`);
+      this.logger.warn(`Failed to upsert FB targeting for campaign ${campaignId}: ${err}`);
     }
+  }
+
+  /**
+   * Age/gender/country performance breakdown. FB rejects a combined age+gender+country
+   * breakdown in one request ("(#100) Current combination of data breakdown columns ...
+   * is invalid") — age+gender may be requested together, but country must be fetched
+   * separately. Two requests, merged into the same CampaignDemographic rows (one row
+   * keyed by age+gender with region='', one keyed by country with ageRange/gender='').
+   */
+  private async syncFbDemographics(
+    campaignId: string,
+    businessId: string,
+    fbCampaignId: string,
+    accessToken: string,
+    since: string,
+    until: string,
+  ) {
+    const timeRange = JSON.stringify({ since, until });
 
     try {
       const rows = await this.fbFetchAllPages<FbDemographicRow>(
         `${FB_API}/${fbCampaignId}/insights`,
         {
           fields: 'impressions,clicks,spend,actions',
-          breakdowns: 'age,gender,country',
-          time_range: JSON.stringify({ since, until }),
+          breakdowns: 'age,gender',
+          time_range: timeRange,
           access_token: accessToken,
           limit: '200',
         },
       );
       for (const row of rows) {
-        const impressions = BigInt(parseInt(row.impressions ?? '0', 10) || 0);
-        const clicks = BigInt(parseInt(row.clicks ?? '0', 10) || 0);
-        const spend = parseFloat(row.spend ?? '0') || 0;
-        let conversions: number | null = null;
-        if (row.actions) {
-          for (const a of row.actions) {
-            if (a.action_type === 'purchase' || a.action_type === 'lead') {
-              conversions = (conversions ?? 0) + (parseFloat(a.value ?? '0') || 0);
-            }
-          }
-        }
-        await this.prisma.campaignDemographic.upsert({
-          where: {
-            campaignId_ageRange_gender_region: {
-              campaignId,
-              ageRange: row.age ?? '',
-              gender: row.gender ?? '',
-              region: row.country ?? '',
-            },
-          },
-          create: {
-            businessId,
-            campaignId,
-            ageRange: row.age ?? '',
-            gender: row.gender ?? '',
-            region: row.country ?? '',
-            impressions,
-            clicks,
-            spend: spend.toFixed(4),
-            conversions,
-          },
-          update: { impressions, clicks, spend: spend.toFixed(4), conversions },
-        });
+        await this.upsertFbDemographicRow(businessId, campaignId, row.age ?? '', row.gender ?? '', '', row);
       }
     } catch (err) {
-      this.logger.warn(`Failed to fetch FB demographic breakdown for campaign ${fbCampaignId}: ${err}`);
+      if (err instanceof FbRateLimitExceededError) throw err;
+      this.logger.warn(`Failed to fetch FB age/gender breakdown for campaign ${fbCampaignId}: ${err}`);
     }
+
+    await delay(PAGE_DELAY_MS);
+
+    try {
+      const rows = await this.fbFetchAllPages<FbDemographicRow>(
+        `${FB_API}/${fbCampaignId}/insights`,
+        {
+          fields: 'impressions,clicks,spend,actions',
+          breakdowns: 'country',
+          time_range: timeRange,
+          access_token: accessToken,
+          limit: '200',
+        },
+      );
+      for (const row of rows) {
+        await this.upsertFbDemographicRow(businessId, campaignId, '', '', row.country ?? '', row);
+      }
+    } catch (err) {
+      if (err instanceof FbRateLimitExceededError) throw err;
+      this.logger.warn(`Failed to fetch FB country breakdown for campaign ${fbCampaignId}: ${err}`);
+    }
+  }
+
+  private async upsertFbDemographicRow(
+    businessId: string,
+    campaignId: string,
+    ageRange: string,
+    gender: string,
+    region: string,
+    row: FbDemographicRow,
+  ) {
+    const impressions = BigInt(parseInt(row.impressions ?? '0', 10) || 0);
+    const clicks = BigInt(parseInt(row.clicks ?? '0', 10) || 0);
+    const spend = parseFloat(row.spend ?? '0') || 0;
+    let conversions: number | null = null;
+    if (row.actions) {
+      for (const a of row.actions) {
+        if (a.action_type === 'purchase' || a.action_type === 'lead') {
+          conversions = (conversions ?? 0) + (parseFloat(a.value ?? '0') || 0);
+        }
+      }
+    }
+    await this.prisma.campaignDemographic.upsert({
+      where: { campaignId_ageRange_gender_region: { campaignId, ageRange, gender, region } },
+      create: { businessId, campaignId, ageRange, gender, region, impressions, clicks, spend: spend.toFixed(4), conversions },
+      update: { impressions, clicks, spend: spend.toFixed(4), conversions },
+    });
   }
 
   private async resolveFbAdAccountId(
@@ -393,34 +576,49 @@ export class AdSyncService {
   }
 
   /**
-   * Pulls the headline + primary text from one representative ad under this campaign.
-   * A campaign can hold multiple ads with different creatives — we take the first
-   * active one as a stand-in for "what this campaign's ad says" (good enough for the
-   * AI content review; users can paste alternate ad copy into the chat if needed).
+   * Pulls the headline + primary text + creative image/reel thumbnail + any
+   * conversation (Click-to-Messenger/WhatsApp) template from one representative ad
+   * under this campaign. A campaign can hold multiple ads with different creatives —
+   * we take the first active one as a stand-in for "what this campaign's ad says"
+   * (good enough for the AI content review; users can paste alternate ad copy into
+   * the chat if needed).
    */
-  private async fetchFbCampaignCreative(campaignId: string, accessToken: string): Promise<{ headline: string; creativeText: string }> {
+  private async fetchFbCampaignCreative(
+    campaignId: string,
+    accessToken: string,
+  ): Promise<{ headline: string; creativeText: string; creativeImageUrl: string; conversationTemplate: string }> {
     try {
       const result = await this.fbGet<{ data: FbAd[] }>(
         `${FB_API}/${campaignId}/ads`,
         {
-          fields: 'creative{title,body,object_story_spec}',
+          fields: 'creative{title,body,image_url,thumbnail_url,object_story_spec}',
           limit: '1',
           access_token: accessToken,
         },
       );
       const creative = result.data[0]?.creative;
-      if (!creative) return { headline: '', creativeText: '' };
+      if (!creative) return { headline: '', creativeText: '', creativeImageUrl: '', conversationTemplate: '' };
 
       const linkData = creative.object_story_spec?.link_data;
       const videoData = creative.object_story_spec?.video_data;
 
       const headline = creative.title || linkData?.name || videoData?.title || '';
       const creativeText = creative.body || linkData?.message || linkData?.description || videoData?.message || '';
+      const creativeImageUrl = creative.image_url || creative.thumbnail_url || videoData?.image_url || '';
 
-      return { headline, creativeText };
+      // Click-to-Messenger/WhatsApp ads route the click to a chat with a welcome
+      // message template defined on the call-to-action — surface it when present.
+      const cta = linkData?.call_to_action;
+      const conversationTemplate = cta?.value?.app_destination &&
+        ['MESSENGER', 'WHATSAPP'].includes(cta.value.app_destination)
+        ? (cta.value.message_extension_template ?? cta.value.text ?? '')
+        : '';
+
+      return { headline, creativeText, creativeImageUrl, conversationTemplate };
     } catch (err) {
+      if (err instanceof FbRateLimitExceededError) throw err;
       this.logger.warn(`Failed to fetch ad creative for FB campaign ${campaignId}: ${err}`);
-      return { headline: '', creativeText: '' };
+      return { headline: '', creativeText: '', creativeImageUrl: '', conversationTemplate: '' };
     }
   }
 
@@ -466,6 +664,16 @@ export class AdSyncService {
       : null;
     const roas = revenue > 0 && spend > 0 ? revenue / spend : null;
 
+    // Pixel-attributed website traffic (requires the business's pixel on the landing page)
+    let landingPageViews: bigint | null = null;
+    if (row.actions) {
+      for (const a of row.actions) {
+        if (a.action_type === 'landing_page_view') {
+          landingPageViews = (landingPageViews ?? 0n) + BigInt(Math.round(parseFloat(a.value ?? '0') || 0));
+        }
+      }
+    }
+
     return {
       date: utcMidnight(new Date(row.date_start)),
       impressions,
@@ -477,6 +685,7 @@ export class AdSyncService {
       cpa,
       reach,
       roas,
+      landingPageViews,
     };
   }
 
@@ -512,6 +721,8 @@ export class AdSyncService {
     accessToken: string,
     dateFrom: Date,
     dateTo: Date,
+    statusFilter: AdStatusFilter,
+    limit?: number,
   ) {
     let campaignsUpserted = 0;
     let metricsUpserted = 0;
@@ -526,13 +737,20 @@ export class AdSyncService {
     const customerId = await this.resolveGoogleCustomerId(adAccount, accessToken, devToken);
     const headers = this.googleHeaders(accessToken, devToken);
 
-    // 1. Fetch all non-removed campaigns
+    // 1. Fetch campaigns — by default only ENABLED/PAUSED (skips REMOVED always, and
+    // skips ENDED/draft-like statuses too) to avoid wasting requests on stale campaigns.
+    // campaign.id is roughly chronological in Google Ads, so DESC + LIMIT approximates
+    // "most recently created N campaigns" without an extra recency field/request.
+    const statusClause = statusFilter === 'active_paused'
+      ? `campaign.status IN ('ENABLED', 'PAUSED')`
+      : `campaign.status != 'REMOVED'`;
+    const limitClause = limit ? ` ORDER BY campaign.id DESC LIMIT ${limit}` : '';
     const campaigns = await this.googleQueryAll<GoogleCampaignRow>(
       customerId,
       `SELECT campaign.id, campaign.name, campaign.status,
               campaign.advertising_channel_type, campaign.start_date, campaign.end_date
        FROM campaign
-       WHERE campaign.status != 'REMOVED'`,
+       WHERE ${statusClause}${limitClause}`,
       headers,
     );
 
@@ -551,6 +769,10 @@ export class AdSyncService {
         status: c.status ?? '',
         headline,
         creativeText,
+        creativeImageUrl: '', // not surfaced for Google in this integration
+        conversationTemplate: '', // Google has no Messenger/WhatsApp click-to-chat concept
+        dailyBudget: null, // TODO: fetch from campaign_budget resource if needed
+        lifetimeBudget: null,
         startDate: c.startDate ? parseGoogleDate(c.startDate) : null,
         endDate: c.endDate ? parseGoogleDate(c.endDate) : null,
         raw: row as object,
@@ -878,6 +1100,7 @@ export class AdSyncService {
       cpa,
       reach: null, // reach needs separate report type in Google Ads API
       roas,
+      landingPageViews: null, // not exposed for Google in this integration
     };
   }
 
@@ -932,6 +1155,10 @@ export class AdSyncService {
         status: c.status,
         headline: c.headline,
         creativeText: c.creativeText,
+        creativeImageUrl: c.creativeImageUrl ?? '',
+        conversationTemplate: c.conversationTemplate ?? '',
+        dailyBudget: c.dailyBudget ?? null,
+        lifetimeBudget: c.lifetimeBudget ?? null,
         startDate: c.startDate,
         endDate: c.endDate,
         raw: c.raw as Prisma.InputJsonValue,
@@ -944,6 +1171,10 @@ export class AdSyncService {
         // synced content if a given sync run failed to refetch the creative.
         ...(c.headline ? { headline: c.headline } : {}),
         ...(c.creativeText ? { creativeText: c.creativeText } : {}),
+        ...(c.creativeImageUrl ? { creativeImageUrl: c.creativeImageUrl } : {}),
+        ...(c.conversationTemplate ? { conversationTemplate: c.conversationTemplate } : {}),
+        dailyBudget: c.dailyBudget ?? null,
+        lifetimeBudget: c.lifetimeBudget ?? null,
         startDate: c.startDate,
         endDate: c.endDate,
         raw: c.raw as Prisma.InputJsonValue,
@@ -966,6 +1197,7 @@ export class AdSyncService {
         cpa: m.cpa ?? undefined,
         reach: m.reach,
         roas: m.roas,
+        landingPageViews: m.landingPageViews,
       },
       update: {
         impressions: m.impressions,
@@ -977,6 +1209,7 @@ export class AdSyncService {
         cpa: m.cpa ?? undefined,
         reach: m.reach,
         roas: m.roas,
+        landingPageViews: m.landingPageViews,
       },
     });
   }
@@ -994,19 +1227,30 @@ export class AdSyncService {
       body: init.body,
     });
 
-    if (res.status === 429 && !retried) {
+    const json = await res.json() as Record<string, unknown>;
+
+    // FB returns rate-limit errors as HTTP 400 with one of these error codes in the
+    // body, not HTTP 429 — so the retry must inspect the body, not just res.status.
+    // Codes: 4 = app-level limit, 17 = user-level limit, 32 = page-level limit, 613 = ad account limit.
+    const fbError = json.error as { message?: string; code?: number } | undefined;
+    const isFbRateLimited = fbError?.code != null && [4, 17, 32, 613].includes(fbError.code);
+
+    if ((res.status === 429 || isFbRateLimited) && !retried) {
       this.logger.warn(`Rate limited by ${url} — waiting 62 s then retrying`);
       await delay(RETRY_AFTER_MS);
       return this.jsonFetch<T>(url, init, true);
     }
 
-    const json = await res.json() as Record<string, unknown>;
+    // Still rate-limited after the retry — this is a sustained quota exhaustion, not a
+    // blip. Throw a distinct error so the sync loop can stop early instead of repeating
+    // the same 62 s-wait-then-fail cycle for every remaining campaign.
+    if (isFbRateLimited && retried) {
+      throw new FbRateLimitExceededError(fbError?.message ?? 'Facebook rate limit still in effect after retry');
+    }
 
     if (!res.ok) {
-      const fbMsg = (json.error as { message?: string } | undefined)?.message;
-      const googleMsg = (json.error as { message?: string } | undefined)?.message
-        ?? (json as Record<string, string>).error_description;
-      throw new BadRequestException(`Ad API error (${res.status}): ${fbMsg ?? googleMsg ?? JSON.stringify(json)}`);
+      const googleMsg = (json as Record<string, string>).error_description;
+      throw new BadRequestException(`Ad API error (${res.status}): ${fbError?.message ?? googleMsg ?? JSON.stringify(json)}`);
     }
 
     return json as T;
@@ -1022,15 +1266,27 @@ interface FbCampaign {
   status?: string;
   start_time?: string;
   stop_time?: string;
+  daily_budget?: string; // minor currency units (cents), only set under Campaign Budget Optimization
+  lifetime_budget?: string;
+  created_time?: string;
 }
 
 interface FbAd {
   creative?: {
     title?: string;
     body?: string;
+    image_url?: string;
+    thumbnail_url?: string;
     object_story_spec?: {
-      link_data?: { name?: string; message?: string; description?: string };
-      video_data?: { title?: string; message?: string };
+      link_data?: {
+        name?: string;
+        message?: string;
+        description?: string;
+        call_to_action?: {
+          value?: { app_destination?: string; message_extension_template?: string; text?: string };
+        };
+      };
+      video_data?: { title?: string; message?: string; image_url?: string };
     };
   };
 }
@@ -1045,6 +1301,11 @@ interface FbAdset {
       cities?: Array<{ name?: string }>;
       regions?: Array<{ name?: string }>;
     };
+    locales?: number[];
+    publisher_platforms?: string[];
+    facebook_positions?: string[];
+    instagram_positions?: string[];
+    device_platforms?: string[];
     flexible_spec?: Array<{ interests?: Array<{ id: string; name: string }> }>;
   };
 }

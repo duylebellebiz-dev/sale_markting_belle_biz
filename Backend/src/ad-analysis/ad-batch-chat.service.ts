@@ -145,7 +145,7 @@ export class AdBatchChatService {
       }>;
       keywords: Array<{ text: string; matchType: string; impressions: bigint; clicks: bigint; spend: Prisma.Decimal | null; ctr: number | null }>;
       searchTerms: Array<{ term: string; impressions: bigint; clicks: bigint; spend: Prisma.Decimal | null }>;
-      targeting: { ageRanges: unknown; genders: unknown; locations: unknown; interests: unknown; languages: unknown } | null;
+      targeting: { ageRanges: unknown; minAge: number | null; maxAge: number | null; genders: unknown; locations: unknown; interests: unknown; languages: unknown; placements: unknown; narrowAudience: unknown } | null;
       demographics: Array<{ ageRange: string; gender: string; region: string; impressions: bigint; clicks: bigint; spend: Prisma.Decimal | null; conversions: number | null }>;
     }>;
   }): string {

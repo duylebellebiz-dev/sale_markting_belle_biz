@@ -43,6 +43,7 @@ async function bootstrap() {
       return callback(null, allowedOrigins.includes(origin));
     },
     credentials: true,
+    exposedHeaders: ['Content-Disposition'],
   });
 
   // Serve uploaded files (logos, email attachments) as static assets

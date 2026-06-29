@@ -91,6 +91,8 @@ export interface SyncResult {
   metricsUpserted: number;
   dateFrom: string;
   dateTo: string;
+  rateLimited?: boolean;
+  message?: string;
 }
 
 export interface AdChatMessage {
@@ -228,13 +230,18 @@ export const adsApi = {
   revokeAccess: (adAccountId: string, userId: string) =>
     api.delete(`/ads/accounts/${adAccountId}/share/${userId}`),
 
-  // Sync
-  sync: (adAccountId: string) =>
-    api.post<SyncResult>(`/ads/sync/${adAccountId}`).then(d<SyncResult>),
+  // Sync — statusFilter 'active_paused' (default) skips ended/archived/deleted campaigns;
+  // dateFrom/dateTo (YYYY-MM-DD, both together) scope the sync to one reporting period
+  // (e.g. "this month") instead of the default incremental window; limit caps it to the
+  // N most recently created campaigns. All three cut sync time/requests for accounts
+  // with many campaigns, which is what trips Facebook's rate limit.
+  sync: (adAccountId: string, params?: { statusFilter?: 'active_paused' | 'all'; dateFrom?: string; dateTo?: string; limit?: number }) =>
+    api.post<SyncResult>(`/ads/sync/${adAccountId}`, undefined, { params: params ?? {} }).then(d<SyncResult>),
 
   // Campaigns — dateFrom/dateTo (YYYY-MM-DD, both together) select a reporting period;
-  // omit both to get the default "last 30 synced days" view.
-  listCampaigns: (params?: { adAccountId?: string; dateFrom?: string; dateTo?: string }) =>
+  // omit both to get the default "last 30 synced days" view. limit caps the list to the
+  // N most recently synced campaigns (matches the sync-time limit, if any).
+  listCampaigns: (params?: { adAccountId?: string; dateFrom?: string; dateTo?: string; limit?: number }) =>
     api.get<Campaign[]>('/ads/campaigns', { params: params ?? {} }).then(d<Campaign[]>),
 
   downloadCampaignsXlsx: (params?: { adAccountId?: string; dateFrom?: string; dateTo?: string }) => {

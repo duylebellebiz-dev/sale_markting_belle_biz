@@ -20,7 +20,7 @@ import type { RequestUser } from '../common/decorators/current-user.decorator';
 import { Public } from '../common/decorators/public.decorator';
 import { RequirePermission } from '../common/decorators/require-permission.decorator';
 import { AdOAuthService } from './ad-oauth.service';
-import { AdSyncService } from './ad-sync.service';
+import { AdSyncService, type AdStatusFilter } from './ad-sync.service';
 import { AdImportService, type AdImportProvider } from './ad-import.service';
 import { AdAnalyzeService } from './ad-analyze.service';
 import { AdReportService } from './ad-report.service';
@@ -194,15 +194,36 @@ export class AdsController {
 
   // ── POST /ads/sync/:adAccountId — pull live data from provider API ─────────
 
+  // statusFilter: 'active_paused' (default, skips ended/archived/deleted campaigns) or
+  // 'all'. dateFrom/dateTo (YYYY-MM-DD, both required together, e.g. "this month") scope
+  // the sync to an explicit reporting period instead of the default incremental window.
+  // limit caps how many campaigns (most recently created first) get the full
+  // creative/budget/targeting/demographic fetch this run — all three cut request
+  // volume for ad accounts with many campaigns, which is what trips FB's rate limit.
   @RequirePermission('analyzeAds')
   @Post('sync/:adAccountId')
-  sync(@Param('adAccountId') adAccountId: string, @CurrentUser() user: RequestUser) {
-    return this.syncService.sync(adAccountId, user.businessId, user.userId, user.role === 'owner');
+  sync(
+    @Param('adAccountId') adAccountId: string,
+    @CurrentUser() user: RequestUser,
+    @Query('statusFilter') statusFilter?: AdStatusFilter,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.syncService.sync(adAccountId, user.businessId, user.userId, user.role === 'owner', {
+      statusFilter,
+      dateFrom: dateFrom ? new Date(dateFrom) : undefined,
+      dateTo: dateTo ? new Date(`${dateTo}T23:59:59.999Z`) : undefined,
+      limit: limit ? parseInt(limit, 10) : undefined,
+    });
   }
 
   // ── GET /ads/campaigns — list synced campaigns with metrics ───────────────
   // dateFrom/dateTo (YYYY-MM-DD, both required together) scope the metrics to a
   // reporting period; omit both to get the default "last 30 synced days" view.
+  // limit caps the campaign list itself to the N most recently synced (updatedAt desc)
+  // — pass the same value used for sync so the page reflects what was just pulled,
+  // not every campaign ever stored for the account.
 
   @RequirePermission('analyzeAds')
   @Get('campaigns')
@@ -211,6 +232,7 @@ export class AdsController {
     @Query('adAccountId') adAccountId?: string,
     @Query('dateFrom') dateFrom?: string,
     @Query('dateTo') dateTo?: string,
+    @Query('limit') limit?: string,
   ) {
     return this.syncService.listCampaigns(
       user.businessId,
@@ -219,6 +241,7 @@ export class AdsController {
       adAccountId,
       dateFrom ? new Date(dateFrom) : undefined,
       dateTo ? new Date(`${dateTo}T23:59:59.999Z`) : undefined,
+      limit ? parseInt(limit, 10) : undefined,
     );
   }
 

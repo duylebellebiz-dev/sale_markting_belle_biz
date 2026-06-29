@@ -394,6 +394,8 @@ export default function CampaignsPage() {
   const [showImport, setShowImport] = useState(false);
   const [filterAccount, setFilterAccount] = useState<string>('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
+  const [syncStatusFilter, setSyncStatusFilter] = useState<'active_paused' | 'all'>('active_paused');
+  const [syncLimit, setSyncLimit] = useState<number | undefined>(25);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const [periodPreset, setPeriodPreset] = useState<PeriodPreset>('30d');
@@ -404,8 +406,10 @@ export default function CampaignsPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
+      // Mirrors the sync-time campaign limit so the page shows the same set that was
+      // just synced (most recently updated first), not every campaign ever stored.
       const [c, a] = await Promise.all([
-        adsApi.listCampaigns({ adAccountId: filterAccount || undefined, ...period }),
+        adsApi.listCampaigns({ adAccountId: filterAccount || undefined, limit: syncLimit, ...period }),
         adsApi.listAccounts(),
       ]);
       setCampaigns(c);
@@ -415,7 +419,7 @@ export default function CampaignsPage() {
     } finally {
       setLoading(false);
     }
-  }, [filterAccount, period.dateFrom, period.dateTo]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [filterAccount, period.dateFrom, period.dateTo, syncLimit]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { load(); }, [load]);
 
@@ -423,7 +427,9 @@ export default function CampaignsPage() {
     if (!canAnalyze) return;
     setSyncing(accountId); setError(null); setSyncResult(null);
     try {
-      const result = await adsApi.sync(accountId);
+      // Reuses the page's own period filter so "sync this month" pulls only that
+      // month's campaigns/insights instead of always crawling every campaign.
+      const result = await adsApi.sync(accountId, { statusFilter: syncStatusFilter, limit: syncLimit, ...period });
       setSyncResult(result);
       await load();
     } catch (e: unknown) {
@@ -522,11 +528,37 @@ export default function CampaignsPage() {
             >
               {showImport ? 'Hide Import' : 'CSV Import'}
             </button>
+            {accounts.some((a) => a.status === 'active') && (
+              <select
+                value={syncStatusFilter}
+                onChange={(e) => setSyncStatusFilter(e.target.value as 'active_paused' | 'all')}
+                title="Which campaigns to pull from the provider when syncing"
+                className="rounded-lg border border-gray-300 text-sm px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              >
+                <option value="active_paused">Sync: Active + Paused only</option>
+                <option value="all">Sync: All campaigns (slower)</option>
+              </select>
+            )}
+            {accounts.some((a) => a.status === 'active') && (
+              <select
+                value={syncLimit ?? 'all'}
+                onChange={(e) => setSyncLimit(e.target.value === 'all' ? undefined : Number(e.target.value))}
+                title="How many of the most recently created campaigns to sync this run"
+                className="rounded-lg border border-gray-300 text-sm px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              >
+                <option value={10}>Newest 10 campaigns</option>
+                <option value={25}>Newest 25 campaigns</option>
+                <option value={50}>Newest 50 campaigns</option>
+                <option value={100}>Newest 100 campaigns</option>
+                <option value="all">All matching campaigns</option>
+              </select>
+            )}
             {accounts.filter((a) => a.status === 'active').map((a) => (
               <button
                 key={a.id}
                 onClick={() => handleSync(a.id)}
                 disabled={!!syncing || !canAnalyze}
+                title={period.dateFrom ? `Syncs the "${periodPreset}" period currently selected below` : undefined}
                 className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:opacity-50 transition-colors"
               >
                 {syncing === a.id ? 'Syncing…' : `Sync ${a.accountName || PROVIDER_LABELS[a.provider]}`}
@@ -560,7 +592,12 @@ export default function CampaignsPage() {
           </div>
         )}
 
-        {syncResult && (
+        {syncResult && syncResult.rateLimited && (
+          <div className="mb-4 rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-800">
+            {syncResult.message ?? 'Facebook rate limit reached — sync stopped early.'}
+          </div>
+        )}
+        {syncResult && !syncResult.rateLimited && (
           <div className="mb-4 rounded-lg bg-green-50 border border-green-200 px-4 py-3 text-sm text-green-800">
             Sync complete — {syncResult.campaignsUpserted} campaigns, {syncResult.metricsUpserted} metric rows ({syncResult.dateFrom} → {syncResult.dateTo})
           </div>

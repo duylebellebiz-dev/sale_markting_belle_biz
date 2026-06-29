@@ -73,7 +73,7 @@ export class AdBatchAnalyzeService {
     try {
       const message = await client.messages.create({
         model: CLAUDE_MODEL,
-        max_tokens: 2000,
+        max_tokens: 3500, // comparing several campaigns needs more room than a single one — avoid mid-JSON truncation
         messages: [{ role: 'user', content: prompt }],
       });
       const textBlock = message.content.find((b) => b.type === 'text');
@@ -135,7 +135,7 @@ export class AdBatchAnalyzeService {
       }>;
       keywords: Array<{ text: string; matchType: string; impressions: bigint; clicks: bigint; spend: Prisma.Decimal | null; ctr: number | null }>;
       searchTerms: Array<{ term: string; impressions: bigint; clicks: bigint; spend: Prisma.Decimal | null }>;
-      targeting: { ageRanges: unknown; genders: unknown; locations: unknown; interests: unknown; languages: unknown } | null;
+      targeting: { ageRanges: unknown; minAge: number | null; maxAge: number | null; genders: unknown; locations: unknown; interests: unknown; languages: unknown; placements: unknown; narrowAudience: unknown } | null;
       demographics: Array<{ ageRange: string; gender: string; region: string; impressions: bigint; clicks: bigint; spend: Prisma.Decimal | null; conversions: number | null }>;
     }>,
   ): string {

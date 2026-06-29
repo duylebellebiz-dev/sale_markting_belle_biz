@@ -578,22 +578,26 @@ model EmailMessage {
 // Synced campaign from Facebook or Google.
 // One row per unique (adAccountId, externalCampaignId).
 model Campaign {
-  id                 String     @id @default(cuid())
-  businessId         String
-  adAccountId        String
-  provider           AdProvider
-  externalCampaignId String // platform's own campaign ID
-  name               String
-  objective          String     @default("")
-  status             String     @default("") // platform status e.g. ACTIVE / PAUSED / DELETED
+  id                   String     @id @default(cuid())
+  businessId           String
+  adAccountId          String
+  provider             AdProvider
+  externalCampaignId   String // platform's own campaign ID
+  name                 String
+  objective            String     @default("")
+  status               String     @default("") // platform status e.g. ACTIVE / PAUSED / DELETED
   // Ad creative text where available (not all campaign types expose this)
-  creativeText       String     @default("") // primary text / body copy
-  headline           String     @default("") // ad headline
-  startDate          DateTime?
-  endDate            DateTime?
-  raw                Json       @default("{}") // full raw API response for future use
-  createdAt          DateTime   @default(now())
-  updatedAt          DateTime   @updatedAt
+  creativeText         String     @default("") // primary text / body copy
+  headline             String     @default("") // ad headline
+  creativeImageUrl     String     @default("") // thumbnail of the image/reel used in the ad post
+  conversationTemplate String     @default("") // Click-to-Messenger/WhatsApp template text, when the ad uses one
+  dailyBudget          Decimal?   @db.Decimal(12, 4) // campaign- or adset-level daily budget, account currency
+  lifetimeBudget       Decimal?   @db.Decimal(12, 4) // campaign- or adset-level lifetime budget, account currency
+  startDate            DateTime?
+  endDate              DateTime?
+  raw                  Json       @default("{}") // full raw API response for future use
+  createdAt            DateTime   @default(now())
+  updatedAt            DateTime   @updatedAt
 
   business     Business              @relation(fields: [businessId], references: [id], onDelete: Cascade)
   adAccount    AdAccount             @relation(fields: [adAccountId], references: [id], onDelete: Cascade)
@@ -660,18 +664,22 @@ model CampaignSearchTerm {
 // custom audiences from the adset. Google: age/gender ranges + raw location/language
 // criterion ids (not resolved to names — see sync code comment).
 model CampaignTargeting {
-  id         String     @id @default(cuid())
-  businessId String
-  campaignId String     @unique
-  provider   AdProvider
-  ageRanges  Json       @default("[]") // string[] e.g. ["18-24","25-34"]
-  genders    Json       @default("[]") // string[] e.g. ["male","female"] or ["all"]
-  locations  Json       @default("[]") // string[] — names (FB) or raw criterion ids (Google)
-  interests  Json       @default("[]") // [{ id, name }] — Facebook only
-  languages  Json       @default("[]") // string[]
-  raw        Json       @default("{}")
-  createdAt  DateTime   @default(now())
-  updatedAt  DateTime   @updatedAt
+  id             String     @id @default(cuid())
+  businessId     String
+  campaignId     String     @unique
+  provider       AdProvider
+  ageRanges      Json       @default("[]") // string[] e.g. ["18-24","25-34"]
+  minAge         Int? // raw targeting.age_min (Facebook) — exact minimum age
+  maxAge         Int? // raw targeting.age_max (Facebook) — exact maximum age
+  genders        Json       @default("[]") // string[] e.g. ["male","female"] or ["all"]
+  locations      Json       @default("[]") // string[] — names (FB) or raw criterion ids (Google)
+  interests      Json       @default("[]") // [{ id, name }] — Facebook only ("Detailed Targeting")
+  languages      Json       @default("[]") // string[] — locale ids/names
+  placements     Json       @default("[]") // string[] — publisher platforms + positions/device, e.g. ["Facebook: Feed","Instagram: Reels"]
+  narrowAudience Json       @default("[]") // [{ interests: [{id,name}] }] — extra AND-narrowing flexible_spec groups beyond the first (Facebook "Narrow Audience")
+  raw            Json       @default("{}")
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
 
   business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
   campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
@@ -706,20 +714,21 @@ model CampaignDemographic {
 // One row per (campaign, date) — daily metric snapshot.
 // Nulls are fine when a provider doesn't supply a field.
 model CampaignMetric {
-  id          String   @id @default(cuid())
-  campaignId  String
-  date        DateTime // UTC midnight — day-level granularity
-  impressions BigInt   @default(0)
-  clicks      BigInt   @default(0)
-  ctr         Float? // fraction 0–1 (e.g. 0.05 = 5 %)
-  spend       Decimal? @db.Decimal(14, 4)
-  conversions Float?
-  cpc         Decimal? @db.Decimal(14, 4)
-  cpa         Decimal? @db.Decimal(14, 4)
-  reach       BigInt?
-  roas        Float? // return on ad spend = revenue / spend
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id               String   @id @default(cuid())
+  campaignId       String
+  date             DateTime // UTC midnight — day-level granularity
+  impressions      BigInt   @default(0)
+  clicks           BigInt   @default(0)
+  ctr              Float? // fraction 0–1 (e.g. 0.05 = 5 %)
+  spend            Decimal? @db.Decimal(14, 4)
+  conversions      Float?
+  cpc              Decimal? @db.Decimal(14, 4)
+  cpa              Decimal? @db.Decimal(14, 4)
+  reach            BigInt?
+  roas             Float? // return on ad spend = revenue / spend
+  landingPageViews BigInt? // pixel-attributed website traffic (action_type 'landing_page_view')
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
   campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
 

@@ -54,7 +54,10 @@ export class AdAnalyzeService {
     try {
       const message = await client.messages.create({
         model: CLAUDE_MODEL,
-        max_tokens: 1500,
+        // Was 1500 — too low for a verbose audienceAnalysis + several recommendations;
+        // Claude's reply would get cut off mid-JSON, fail to parse, and the whole raw
+        // (truncated) text would land in contentReview with the other sections blank.
+        max_tokens: 3000,
         messages: [{ role: 'user', content: prompt }],
       });
       const textBlock = message.content.find((b) => b.type === 'text');
@@ -124,6 +127,10 @@ export class AdAnalyzeService {
     status: string;
     headline: string;
     creativeText: string;
+    creativeImageUrl: string;
+    conversationTemplate: string;
+    dailyBudget: Prisma.Decimal | null;
+    lifetimeBudget: Prisma.Decimal | null;
     startDate: Date | null;
     endDate: Date | null;
     adAccount: { provider: string; accountName: string };
@@ -138,10 +145,11 @@ export class AdAnalyzeService {
       cpa: Prisma.Decimal | null;
       reach: bigint | null;
       roas: number | null;
+      landingPageViews: bigint | null;
     }>;
     keywords: Array<{ text: string; matchType: string; impressions: bigint; clicks: bigint; spend: Prisma.Decimal | null; ctr: number | null }>;
     searchTerms: Array<{ term: string; impressions: bigint; clicks: bigint; spend: Prisma.Decimal | null }>;
-    targeting: { ageRanges: unknown; genders: unknown; locations: unknown; interests: unknown; languages: unknown } | null;
+    targeting: { ageRanges: unknown; minAge: number | null; maxAge: number | null; genders: unknown; locations: unknown; interests: unknown; languages: unknown; placements: unknown; narrowAudience: unknown } | null;
     demographics: Array<{ ageRange: string; gender: string; region: string; impressions: bigint; clicks: bigint; spend: Prisma.Decimal | null; conversions: number | null }>;
   }): string {
     const summary = this.summarizeMetrics(campaign.metrics);
@@ -165,6 +173,10 @@ export class AdAnalyzeService {
       `- Status: ${campaign.status || 'unspecified'}`,
       `- Headline: ${campaign.headline || '(none provided)'}`,
       `- Body / creative text: ${campaign.creativeText || '(none provided)'}`,
+      `- Image/reel used: ${campaign.creativeImageUrl || '(none provided)'}`,
+      `- Conversation (Messenger/WhatsApp) template: ${campaign.conversationTemplate || '(not used)'}`,
+      `- Daily budget: ${campaign.dailyBudget != null ? campaign.dailyBudget.toString() : '(not set / set at adset level only)'}`,
+      `- Lifetime budget: ${campaign.lifetimeBudget != null ? campaign.lifetimeBudget.toString() : '(not set)'}`,
       `- Date range: ${campaign.startDate?.toISOString().slice(0, 10) ?? '?'} to ${campaign.endDate?.toISOString().slice(0, 10) ?? 'ongoing'}`,
       '',
       'Metrics summary (aggregated over the available period, not raw daily rows):',
@@ -190,6 +202,7 @@ export class AdAnalyzeService {
       cpa: Prisma.Decimal | null;
       reach: bigint | null;
       roas: number | null;
+      landingPageViews: bigint | null;
     }>,
   ): string {
     if (!metrics.length) return '(no metrics synced yet)';
@@ -201,6 +214,8 @@ export class AdAnalyzeService {
     let hasConversions = false;
     let reach = 0n;
     let hasReach = false;
+    let landingPageViews = 0n;
+    let hasLandingPageViews = false;
 
     for (const m of metrics) {
       impressions += m.impressions;
@@ -213,6 +228,10 @@ export class AdAnalyzeService {
       if (m.reach != null) {
         reach += m.reach;
         hasReach = true;
+      }
+      if (m.landingPageViews != null) {
+        landingPageViews += m.landingPageViews;
+        hasLandingPageViews = true;
       }
     }
 
@@ -233,6 +252,7 @@ export class AdAnalyzeService {
       `- Total conversions: ${hasConversions ? conversions.toFixed(2) : 'n/a'}`,
       `- Overall CPA: ${cpa !== null ? cpa.toFixed(2) : 'n/a'}`,
       `- Total reach: ${hasReach ? reach.toString() : 'n/a'}`,
+      `- Website traffic (pixel-attributed landing page views): ${hasLandingPageViews ? landingPageViews.toString() : 'n/a'}`,
     ];
 
     return parts.join('\n');
@@ -263,7 +283,15 @@ export class AdAnalyzeService {
     }
 
     if (!raw || typeof raw !== 'object') {
-      this.logger.warn(`Claude returned non-JSON analysis; storing raw text as contentReview.`);
+      // Most likely cause: the reply got cut off mid-JSON (hit max_tokens) before the
+      // closing brace, so JSON.parse failed on an otherwise-mostly-complete object.
+      // Salvage whichever top-level fields are still intact via regex instead of
+      // dumping the entire (truncated) blob into contentReview and leaving the rest
+      // of the report blank.
+      this.logger.warn(`Claude returned non-JSON analysis; attempting field-level salvage.`);
+      const salvaged = this.salvagePartialJson(cleaned);
+      if (salvaged) return salvaged;
+
       return {
         contentReview: cleaned || '(no response)',
         performanceAnalysis: '',
@@ -282,6 +310,39 @@ export class AdAnalyzeService {
         : [],
     };
   }
+
+  /**
+   * Pulls "key": "value" string fields out of a malformed/truncated JSON blob by regex,
+   * tolerating an unterminated final string (no closing quote/brace) — that's exactly
+   * what a max_tokens cutoff produces. Returns null if nothing recognizable was found.
+   */
+  private salvagePartialJson(text: string): AnalysisResult | null {
+    const extractString = (key: string): string => {
+      // Matches "key": "...up to the next unescaped quote, or end of string if truncated"
+      const match = text.match(new RegExp(`"${key}"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)("|$)`));
+      return match ? match[1].replace(/\\"/g, '"').replace(/\\n/g, '\n') : '';
+    };
+
+    const contentReview = extractString('contentReview');
+    const performanceAnalysis = extractString('performanceAnalysis');
+    const audienceAnalysis = extractString('audienceAnalysis');
+
+    const recsMatch = text.match(/"recommendations"\s*:\s*\[([\s\S]*?)(\]|$)/);
+    const recommendations: string[] = [];
+    if (recsMatch) {
+      const itemRe = /"((?:\\.|[^"\\])*)"/g;
+      let m: RegExpExecArray | null;
+      while ((m = itemRe.exec(recsMatch[1])) !== null) {
+        recommendations.push(m[1].replace(/\\"/g, '"').replace(/\\n/g, '\n'));
+      }
+    }
+
+    if (!contentReview && !performanceAnalysis && !audienceAnalysis && !recommendations.length) {
+      return null;
+    }
+
+    return { contentReview, performanceAnalysis, audienceAnalysis, recommendations };
+  }
 }
 
 /**
@@ -292,7 +353,7 @@ export class AdAnalyzeService {
 export function summarizeAudienceContext(campaign: {
   keywords: Array<{ text: string; matchType: string; impressions: bigint; clicks: bigint; spend: Prisma.Decimal | null; ctr: number | null }>;
   searchTerms: Array<{ term: string; impressions: bigint; clicks: bigint; spend: Prisma.Decimal | null }>;
-  targeting: { ageRanges: unknown; genders: unknown; locations: unknown; interests: unknown; languages: unknown } | null;
+  targeting: { ageRanges: unknown; minAge: number | null; maxAge: number | null; genders: unknown; locations: unknown; interests: unknown; languages: unknown; placements: unknown; narrowAudience: unknown } | null;
   demographics: Array<{ ageRange: string; gender: string; region: string; impressions: bigint; clicks: bigint; spend: Prisma.Decimal | null; conversions: number | null }>;
 }): string {
   const parts: string[] = [];
@@ -315,13 +376,20 @@ export function summarizeAudienceContext(campaign: {
   if (campaign.targeting) {
     const t = campaign.targeting;
     parts.push('Targeting / audience setup:');
-    parts.push(`  - Age ranges: ${jsonList(t.ageRanges)}`);
+    parts.push(`  - Age ranges: ${jsonList(t.ageRanges)}${t.minAge != null || t.maxAge != null ? ` (exact: ${t.minAge ?? '?'}-${t.maxAge ?? '?'})` : ''}`);
     parts.push(`  - Genders: ${jsonList(t.genders)}`);
     parts.push(`  - Locations: ${jsonList(t.locations)}`);
     if (Array.isArray(t.interests) && t.interests.length) {
-      parts.push(`  - Interests: ${(t.interests as Array<{ name?: string }>).map((i) => i.name).filter(Boolean).join(', ')}`);
+      parts.push(`  - Detailed targeting (interests): ${(t.interests as Array<{ name?: string }>).map((i) => i.name).filter(Boolean).join(', ')}`);
+    }
+    if (Array.isArray(t.narrowAudience) && t.narrowAudience.length) {
+      const groups = (t.narrowAudience as Array<{ interests?: Array<{ name?: string }> }>)
+        .map((g) => (g.interests ?? []).map((i) => i.name).filter(Boolean).join(', '))
+        .filter(Boolean);
+      if (groups.length) parts.push(`  - Narrowed audience (AND with above): ${groups.join(' AND ')}`);
     }
     parts.push(`  - Languages: ${jsonList(t.languages)}`);
+    parts.push(`  - Placements: ${jsonList(t.placements)}`);
   }
 
   if (campaign.demographics.length) {
