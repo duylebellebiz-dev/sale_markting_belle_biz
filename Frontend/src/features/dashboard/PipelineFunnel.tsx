@@ -1,33 +1,36 @@
 import type { PipelineSlice } from './dashboardApi';
+import { PIPELINE_STAGE_LABELS, type PipelineStage } from '../customers/customersApi';
 
-const STAGE_ORDER = [
+// Keys must match the Prisma `PipelineStage` enum values the backend groups
+// by (e.g. 'ProposalSent', 'ClosedWon'), not the display labels.
+const STAGE_ORDER: PipelineStage[] = [
   'Lead',
   'Contacted',
   'Interested',
-  'Proposal Sent',
+  'ProposalSent',
   'Negotiation',
-  'Closed Won',
-  'Closed Lost',
+  'ClosedWon',
+  'ClosedLost',
 ];
 
 const STAGE_COLORS: Record<string, string> = {
-  'Lead':          'bg-gray-300',
-  'Contacted':     'bg-blue-300',
-  'Interested':    'bg-yellow-300',
-  'Proposal Sent': 'bg-orange-300',
-  'Negotiation':   'bg-purple-300',
-  'Closed Won':    'bg-green-400',
-  'Closed Lost':   'bg-red-300',
+  Lead:         'bg-gray-300',
+  Contacted:    'bg-blue-300',
+  Interested:   'bg-yellow-300',
+  ProposalSent: 'bg-orange-300',
+  Negotiation:  'bg-purple-300',
+  ClosedWon:    'bg-green-400',
+  ClosedLost:   'bg-red-300',
 };
 
 const STAGE_TEXT: Record<string, string> = {
-  'Lead':          'text-gray-700',
-  'Contacted':     'text-blue-700',
-  'Interested':    'text-yellow-700',
-  'Proposal Sent': 'text-orange-700',
-  'Negotiation':   'text-purple-700',
-  'Closed Won':    'text-green-700',
-  'Closed Lost':   'text-red-600',
+  Lead:         'text-gray-700',
+  Contacted:    'text-blue-700',
+  Interested:   'text-yellow-700',
+  ProposalSent: 'text-orange-700',
+  Negotiation:  'text-purple-700',
+  ClosedWon:    'text-green-700',
+  ClosedLost:   'text-red-600',
 };
 
 interface Props { breakdown: PipelineSlice[] }
@@ -56,7 +59,7 @@ export default function PipelineFunnel({ breakdown }: Props) {
           return (
             <div key={stage} className="flex items-center gap-3">
               <span className={`text-xs font-medium w-28 shrink-0 ${STAGE_TEXT[stage] ?? 'text-gray-600'}`}>
-                {stage}
+                {PIPELINE_STAGE_LABELS[stage] ?? stage}
               </span>
               <div className="flex-1 bg-gray-100 rounded-full h-4 overflow-hidden">
                 {count > 0 && (

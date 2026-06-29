@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { PIPELINE_STAGES, type Customer, type CustomerPayload, type StaffUser } from './customersApi';
+import { PIPELINE_STAGES, PIPELINE_STAGE_LABELS, type Customer, type CustomerPayload, type StaffUser } from './customersApi';
 
 interface Props {
   initial?: Customer | null;
@@ -198,7 +198,7 @@ export default function CustomerForm({ initial, staff, isOwner, onSubmit, onClos
 
             <Field label="Pipeline Stage">
               <select value={form.stage} onChange={(e) => set('stage', e.target.value as CustomerPayload['stage'])} className={INPUT}>
-                {PIPELINE_STAGES.map((s) => <option key={s} value={s}>{s}</option>)}
+                {PIPELINE_STAGES.map((s) => <option key={s} value={s}>{PIPELINE_STAGE_LABELS[s]}</option>)}
               </select>
             </Field>
 

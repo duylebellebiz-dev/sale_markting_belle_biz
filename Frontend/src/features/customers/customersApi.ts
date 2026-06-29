@@ -1,16 +1,29 @@
 import api from '../../lib/api';
 
+// Values must match the Prisma `PipelineStage` enum exactly as the backend
+// API sends/validates it (the @map() in schema.prisma only renames the DB
+// column value, not the JS value used over the wire).
 export const PIPELINE_STAGES = [
   'Lead',
   'Contacted',
   'Interested',
-  'Proposal Sent',
+  'ProposalSent',
   'Negotiation',
-  'Closed Won',
-  'Closed Lost',
+  'ClosedWon',
+  'ClosedLost',
 ] as const;
 
 export type PipelineStage = (typeof PIPELINE_STAGES)[number];
+
+export const PIPELINE_STAGE_LABELS: Record<PipelineStage, string> = {
+  Lead: 'Lead',
+  Contacted: 'Contacted',
+  Interested: 'Interested',
+  ProposalSent: 'Proposal Sent',
+  Negotiation: 'Negotiation',
+  ClosedWon: 'Closed Won',
+  ClosedLost: 'Closed Lost',
+};
 
 export interface Customer {
   id: string;

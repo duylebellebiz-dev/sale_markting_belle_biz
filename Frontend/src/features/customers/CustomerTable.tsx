@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { Customer } from './customersApi';
+import { PIPELINE_STAGES, PIPELINE_STAGE_LABELS, type Customer } from './customersApi';
 import StageBadge from './StageBadge';
 
 interface Props {
@@ -76,8 +76,8 @@ export default function CustomerTable({ customers, isOwner, onEdit, onDelete, on
           className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
         >
           <option value="">All stages</option>
-          {['Lead','Contacted','Interested','Proposal Sent','Negotiation','Closed Won','Closed Lost'].map(
-            (s) => <option key={s} value={s}>{s}</option>,
+          {PIPELINE_STAGES.map(
+            (s) => <option key={s} value={s}>{PIPELINE_STAGE_LABELS[s]}</option>,
           )}
         </select>
       </div>
