@@ -1,4 +1,4 @@
-import { IsBoolean, IsNumber, IsOptional, IsString, Min, MinLength } from 'class-validator';
+import { IsBoolean, IsNumber, IsOptional, IsString, MinLength } from 'class-validator';
 
 export class CreateServiceDto {
   @IsString()
@@ -6,7 +6,6 @@ export class CreateServiceDto {
   name: string;
 
   @IsNumber()
-  @Min(0)
   price: number;
 
   @IsOptional()

@@ -34,7 +34,6 @@ export class LineItemDto {
 
   @Type(() => Number)
   @IsNumber()
-  @Min(0)
   rate: number;
 }
 

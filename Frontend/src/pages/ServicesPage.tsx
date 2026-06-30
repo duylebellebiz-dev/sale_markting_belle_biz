@@ -236,7 +236,7 @@ function ServiceFormRow({ initial, onSave, onCancel }: ServiceFormRowProps) {
     setErr(null);
     if (!name.trim()) { setErr('Name is required.'); return; }
     const p = parseFloat(price);
-    if (isNaN(p) || p < 0) { setErr('Enter a valid price.'); return; }
+    if (isNaN(p)) { setErr('Enter a valid price.'); return; }
     setSubmitting(true);
     try {
       await onSave({ name: name.trim(), price: p, isActive });
@@ -272,13 +272,12 @@ function ServiceFormRow({ initial, onSave, onCancel }: ServiceFormRowProps) {
           <label className="text-xs font-medium text-gray-600 uppercase tracking-wide">Price *</label>
           <input
             type="number"
-            min="0"
             step="0.01"
             value={price}
             onChange={(e) => setPrice(e.target.value)}
             onKeyDown={handleKeyDown}
             className={INPUT}
-            placeholder="0.00"
+            placeholder="0.00 (negative for discount)"
           />
         </div>
 

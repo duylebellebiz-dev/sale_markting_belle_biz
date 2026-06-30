@@ -223,7 +223,7 @@ export default function InvoiceForm({ initial, onSubmit, onClose }: Props) {
       const qty = parseFloat(row.quantity);
       const rate = parseFloat(row.rate);
       if (isNaN(qty) || qty < 0) { setError('Line item quantity must be a valid non-negative number.'); return; }
-      if (isNaN(rate) || rate < 0) { setError('Line item rate must be a valid non-negative number.'); return; }
+      if (isNaN(rate)) { setError('Line item rate must be a valid number.'); return; }
     }
 
     const lineItems = rows.map((r) => ({
@@ -425,7 +425,6 @@ export default function InvoiceForm({ initial, onSubmit, onClose }: Props) {
                   />
                   <input
                     type="number"
-                    min="0"
                     step="0.01"
                     value={row.rate}
                     onChange={(e) => updateRow(row.id, 'rate', e.target.value)}

@@ -1,4 +1,4 @@
-import { IsBoolean, IsNumber, IsOptional, IsString, Min, MinLength } from 'class-validator';
+import { IsBoolean, IsNumber, IsOptional, IsString, MinLength } from 'class-validator';
 
 export class UpdateServiceDto {
   @IsOptional()
@@ -8,7 +8,6 @@ export class UpdateServiceDto {
 
   @IsOptional()
   @IsNumber()
-  @Min(0)
   price?: number;
 
   @IsOptional()
