@@ -129,7 +129,10 @@ function normalizeProvince(province?: string | null) {
 }
 
 function splitStreetAndCity(prefix: string) {
-  const tokens = cleanWhitespace(prefix).split(' ').filter(Boolean);
+  const tokens = cleanWhitespace(prefix)
+    .split(' ')
+    .map((t) => t.replace(/,+$/, ''))
+    .filter(Boolean);
   let boundary = -1;
 
   for (let i = 0; i < tokens.length; i += 1) {
@@ -211,7 +214,7 @@ function addressLines(address?: string | null, province?: string | null, country
   const localitySource = cleanWhitespace([between, suffix].filter(Boolean).join(' '));
 
   const { line1, city } = splitStreetAndCity(prefix);
-  const localityCity = city || localitySource;
+  const localityCity = cleanWhitespace((city || localitySource).replace(/,+/g, ',').replace(/,+$/, ''));
   const line2Parts: string[] = [];
   if (localityCity) line2Parts.push(localityCity);
   line2Parts.push([parsedProvince, postalCode].filter(Boolean).join(' '));
@@ -478,7 +481,7 @@ export class InvoicePdfService {
     };
 
     metaRow('Invoice Date :', fmtDate(inv.invoiceDate));
-    if (inv.dueDate)  metaRow('Due Date :', fmtDate(inv.dueDate));
+    // Due Date is intentionally not shown on the PDF — still stored/editable on the invoice.
     if (inv.terms)    metaRow('Terms :', inv.terms);
 
     const sectionBottom = Math.max(ly, ry) + 14;

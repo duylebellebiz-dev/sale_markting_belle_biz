@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import AppShell from '../components/AppShell';
 import { useInvoices } from '../features/invoices/useInvoices';
 import InvoiceStatusBadge from '../features/invoices/InvoiceStatusBadge';
-import { invoicesApi } from '../features/invoices/invoicesApi';
+import { invoicesApi, INVOICE_STATUS_LABELS } from '../features/invoices/invoicesApi';
 import type { Invoice } from '../features/invoices/invoicesApi';
 import { useAuth } from '../context/AuthContext';
 import { usePermission } from '../features/staff/usePermission';
@@ -16,6 +16,14 @@ function customerName(inv: Invoice) {
   return '-';
 }
 
+// Shop/business name — prefer the billTo snapshot (always set at invoice
+// creation time), fall back to the live customer record.
+function shopName(inv: Invoice) {
+  if (inv.billTo?.name) return inv.billTo.name;
+  if (typeof inv.customerId === 'object') return inv.customerId.shopName || inv.customerId.customerName;
+  return '-';
+}
+
 function fmt(iso?: string) {
   if (!iso) return '-';
   return new Date(iso).toLocaleDateString(undefined, { dateStyle: 'medium' });
@@ -25,7 +33,7 @@ function money(n: number) {
   return Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-const STATUS_ORDER: Invoice['status'][] = ['Draft', 'Sent', 'Partially Paid', 'Overdue', 'Paid', 'Cancelled'];
+const STATUS_ORDER: Invoice['status'][] = ['Draft', 'Sent', 'PartiallyPaid', 'Overdue', 'Paid', 'Cancelled'];
 
 export default function InvoicesPage() {
   const navigate = useNavigate();
@@ -39,6 +47,8 @@ export default function InvoicesPage() {
   const [modal, setModal] = useState<Modal>(null);
   const [statusFilter, setStatusFilter] = useState<string>('');
   const [search, setSearch] = useState('');
+  const [dueFrom, setDueFrom] = useState('');
+  const [dueTo, setDueTo] = useState('');
   const [actionError, setActionError] = useState<string | null>(null);
   const [confirmId, setConfirmId] = useState<string | null>(null);
 
@@ -57,13 +67,17 @@ export default function InvoicesPage() {
     const matchSearch =
       !q ||
       inv.invoiceNumber.toLowerCase().includes(q) ||
-      customerName(inv).toLowerCase().includes(q);
+      customerName(inv).toLowerCase().includes(q) ||
+      shopName(inv).toLowerCase().includes(q);
     const matchStatus = !statusFilter || inv.status === statusFilter;
-    return matchSearch && matchStatus;
+    const dueDate = inv.dueDate ? inv.dueDate.slice(0, 10) : null;
+    const matchDueFrom = !dueFrom || (dueDate && dueDate >= dueFrom);
+    const matchDueTo   = !dueTo   || (dueDate && dueDate <= dueTo);
+    return matchSearch && matchStatus && matchDueFrom && matchDueTo;
   });
 
   // Summary stats for partially-paid invoices
-  const partialCount  = invoices.filter((i) => i.status === 'Partially Paid').length;
+  const partialCount  = invoices.filter((i) => i.status === 'PartiallyPaid').length;
   const overdueCount  = invoices.filter((i) => i.status === 'Overdue').length;
   const totalOutstanding = invoices
     .filter((i) => i.status !== 'Paid' && i.status !== 'Cancelled' && i.status !== 'Draft')
@@ -104,7 +118,7 @@ export default function InvoicesPage() {
               label="Partially Paid"
               value={String(partialCount)}
               color={partialCount > 0 ? 'amber' : 'gray'}
-              onClick={() => setStatusFilter('Partially Paid')}
+              onClick={() => setStatusFilter('PartiallyPaid')}
             />
             <StatChip
               label="Overdue"
@@ -145,7 +159,7 @@ export default function InvoicesPage() {
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search by invoice # or customer..."
+                placeholder="Search by invoice #, customer, or shop name..."
                 className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
               />
               <select
@@ -154,8 +168,32 @@ export default function InvoicesPage() {
                 className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
               >
                 <option value="">All statuses</option>
-                {STATUS_ORDER.map((s) => <option key={s} value={s}>{s}</option>)}
+                {STATUS_ORDER.map((s) => <option key={s} value={s}>{INVOICE_STATUS_LABELS[s]}</option>)}
               </select>
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-gray-500 whitespace-nowrap">Due date</label>
+                <input
+                  type="date"
+                  value={dueFrom}
+                  onChange={(e) => setDueFrom(e.target.value)}
+                  className="rounded-lg border border-gray-300 px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+                <span className="text-xs text-gray-400">to</span>
+                <input
+                  type="date"
+                  value={dueTo}
+                  onChange={(e) => setDueTo(e.target.value)}
+                  className="rounded-lg border border-gray-300 px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+                {(dueFrom || dueTo) && (
+                  <button
+                    onClick={() => { setDueFrom(''); setDueTo(''); }}
+                    className="text-xs text-indigo-500 hover:text-indigo-700 whitespace-nowrap"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Empty state */}
@@ -186,6 +224,7 @@ export default function InvoicesPage() {
                       <Th right>Balance Due</Th>
                       <Th>Status</Th>
                       <Th>Date</Th>
+                      <Th>Due Date</Th>
                       <Th>Actions</Th>
                     </tr>
                   </thead>
@@ -193,7 +232,7 @@ export default function InvoicesPage() {
                     {filtered.map((inv) => {
                       const balance = Number(inv.balanceDue ?? 0);
                       const total   = Number(inv.total ?? 0);
-                      const isPartial = inv.status === 'Partially Paid';
+                      const isPartial = inv.status === 'PartiallyPaid';
 
                       return (
                         <tr
@@ -211,7 +250,10 @@ export default function InvoicesPage() {
                           </td>
 
                           <td className="px-4 py-3 text-gray-700 whitespace-nowrap">
-                            {customerName(inv)}
+                            <div className="font-medium text-gray-900">{shopName(inv)}</div>
+                            {customerName(inv) !== shopName(inv) && (
+                              <div className="text-xs text-gray-400">{customerName(inv)}</div>
+                            )}
                           </td>
 
                           <td className="px-4 py-3 text-right font-medium text-gray-900 whitespace-nowrap">
@@ -255,6 +297,10 @@ export default function InvoicesPage() {
                                 Promise: {fmt(inv.promisedPaymentDate)}
                               </div>
                             )}
+                          </td>
+
+                          <td className="px-4 py-3 text-gray-500 whitespace-nowrap">
+                            {fmt(inv.dueDate)}
                           </td>
 
                           {/* Actions */}

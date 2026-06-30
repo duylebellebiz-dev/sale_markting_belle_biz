@@ -93,7 +93,12 @@ interface CustomerRowResult {
   rowNumber: number;
   status: RowStatus;
   errors?: string[];
-  data?: { customerName?: string; email?: string; phoneNumber?: string };
+  data?: {
+    customerName?: string; email?: string; phoneNumber?: string;
+    shopName?: string; shopAddress?: string; shopPhoneNumber?: string;
+    contactSource?: string; stage?: string; status?: string;
+    note?: string; dateOfContact?: string;
+  };
   existingId?: string;
 }
 interface CustomerPreview {
@@ -135,7 +140,7 @@ function CustomerImportTab({ canImport }: { canImport: boolean }) {
   const [file, setFile]             = useState<File | null>(null);
   const [preview, setPreview]       = useState<CustomerPreview | null>(null);
   const [result, setResult]         = useState<CustomerCommitResult | null>(null);
-  const [dupAction, setDupAction]   = useState<DupAction>('skip');
+  const [dupAction, setDupAction]   = useState<DupAction>('update');
   const [previewing, setPreviewing] = useState(false);
   const [committing, setCommitting] = useState(false);
   const [downloading, setDownloading] = useState(false);
@@ -228,11 +233,21 @@ function CustomerImportTab({ canImport }: { canImport: boolean }) {
           <PreviewTable rows={preview.rows.map((r) => ({
             rowNumber: r.rowNumber,
             status:    r.status,
-            col1:      r.data?.customerName ?? '—',
-            col2:      r.data?.email ?? '—',
-            col3:      r.data?.phoneNumber ?? '—',
+            cols: [
+              r.data?.customerName ?? '—',
+              r.data?.shopName ?? '—',
+              r.data?.email ?? '—',
+              r.data?.phoneNumber ?? '—',
+              r.data?.shopPhoneNumber ?? '—',
+              r.data?.shopAddress ?? '—',
+              r.data?.contactSource ?? '—',
+              r.data?.stage ?? '—',
+              r.data?.status ?? '—',
+              r.data?.dateOfContact ?? '—',
+              r.data?.note ?? '—',
+            ],
             detail:    r.errors?.join('; ') ?? (r.status === 'duplicate' ? 'Matches existing record' : ''),
-          }))} headers={['Customer Name', 'Email', 'Phone']} />
+          }))} headers={['Customer Name', 'Shop Name', 'Email', 'Phone', 'Shop Phone', 'Shop Address', 'Source', 'Stage', 'Status', 'Date of Contact', 'Note']} />
 
           {preview.valid + preview.duplicates > 0
             ? <CommitButton loading={committing} onClick={handleCommit}
@@ -405,9 +420,12 @@ function InvoiceImportTab({ canImport }: { canImport: boolean }) {
           <PreviewTable rows={preview.rows.map((r) => ({
             rowNumber: r.rowNumber,
             status:    r.status,
-            col1:      r.data?.invoiceNumber ?? '—',
-            col2:      r.data?.clientName ?? '—',
-            col3:      r.data?.amount ?? '—',
+            cols: [
+              r.data?.invoiceNumber ?? '—',
+              r.data?.clientName ?? '—',
+              r.data?.amount ?? '—',
+              r.data?.status ?? '—',
+            ],
             detail:
               r.errors?.join('; ') ??
               r.warnings?.join('; ') ??
@@ -418,7 +436,7 @@ function InvoiceImportTab({ canImport }: { canImport: boolean }) {
                 : r.data?.clientName
                 ? `⚠ Customer "${r.data.clientName}" not found`
                 : ''),
-          }))} headers={['Invoice #', 'Client Name', 'Amount']} />
+          }))} headers={['Invoice #', 'Client Name', 'Amount', 'Status']} />
 
           {actionableCount > 0
             ? <CommitButton loading={committing} onClick={handleCommit} accent="violet"
@@ -542,10 +560,10 @@ function DupActionBox({
 
 interface PreviewRow {
   rowNumber: number; status: RowStatus;
-  col1: string; col2: string; col3: string; detail: string;
+  cols: string[]; detail: string;
 }
 
-function PreviewTable({ rows, headers }: { rows: PreviewRow[]; headers: [string, string, string] }) {
+function PreviewTable({ rows, headers }: { rows: PreviewRow[]; headers: string[] }) {
   return (
     <div className="overflow-x-auto rounded-xl border border-gray-200 max-h-96 overflow-y-auto">
       <table className="min-w-full text-xs">
@@ -553,9 +571,7 @@ function PreviewTable({ rows, headers }: { rows: PreviewRow[]; headers: [string,
           <tr className="border-b border-gray-200">
             <Th>Row</Th>
             <Th>Status</Th>
-            <Th>{headers[0]}</Th>
-            <Th>{headers[1]}</Th>
-            <Th>{headers[2]}</Th>
+            {headers.map((h) => <Th key={h}>{h}</Th>)}
             <Th>Details</Th>
           </tr>
         </thead>
@@ -568,9 +584,9 @@ function PreviewTable({ rows, headers }: { rows: PreviewRow[]; headers: [string,
             }>
               <td className="px-3 py-2 font-mono text-gray-400">{r.rowNumber}</td>
               <td className="px-3 py-2"><RowBadge status={r.status} /></td>
-              <td className="px-3 py-2 font-medium text-gray-900 max-w-[140px] truncate">{r.col1}</td>
-              <td className="px-3 py-2 text-gray-600 max-w-[140px] truncate">{r.col2}</td>
-              <td className="px-3 py-2 text-gray-600">{r.col3}</td>
+              {r.cols.map((c, i) => (
+                <td key={i} className="px-3 py-2 text-gray-600 max-w-[140px] truncate" title={c}>{c}</td>
+              ))}
               <td className="px-3 py-2 text-gray-500 max-w-xs">
                 {r.status === 'error'  && <span className="text-red-600">{r.detail}</span>}
                 {r.status === 'warning' && <span className="text-blue-600">{r.detail}</span>}

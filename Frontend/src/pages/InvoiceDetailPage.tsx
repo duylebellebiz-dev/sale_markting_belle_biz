@@ -327,7 +327,7 @@ export default function InvoiceDetailPage() {
 
   const { status } = invoice;
   const isPaid       = status === 'Paid';
-  const isPartial    = status === 'Partially Paid';
+  const isPartial    = status === 'PartiallyPaid';
   const isCancelled  = status === 'Cancelled';
   const isDraft      = status === 'Draft';
   const needsPayment = status === 'Sent' || status === 'Overdue' || isPartial;

@@ -1,6 +1,18 @@
 import api from '../../lib/api';
 
-export type InvoiceStatus = 'Draft' | 'Sent' | 'Partially Paid' | 'Paid' | 'Overdue' | 'Cancelled';
+// Values must match the Prisma `InvoiceStatus` enum exactly as the backend
+// API sends it (the @map() in schema.prisma only renames the DB column
+// value, not the JS value used over the wire).
+export type InvoiceStatus = 'Draft' | 'Sent' | 'PartiallyPaid' | 'Paid' | 'Overdue' | 'Cancelled';
+
+export const INVOICE_STATUS_LABELS: Record<InvoiceStatus, string> = {
+  Draft: 'Draft',
+  Sent: 'Sent',
+  PartiallyPaid: 'Partially Paid',
+  Paid: 'Paid',
+  Overdue: 'Overdue',
+  Cancelled: 'Cancelled',
+};
 
 export interface LineItem {
   serviceId?: string;

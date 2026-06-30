@@ -102,7 +102,7 @@ export interface OpenInvoiceTask {
   total?: number;
   amount?: number;
   balanceDue?: number;
-  status: 'Sent' | 'Overdue' | 'Partially Paid';
+  status: 'Sent' | 'Overdue' | 'PartiallyPaid';
   invoiceDate?: string;
   dateSent?: string;
   nextReminderAt?: string;

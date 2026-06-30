@@ -362,7 +362,7 @@ export class AdSyncService {
         }
 
         if (adsetSnapshot?.targeting) {
-          await this.upsertFbTargeting(campaign.id, adAccount.businessId, adsetSnapshot.targeting);
+          await this.upsertFbTargeting(campaign.id, adAccount.businessId, adsetSnapshot.targeting, accessToken);
         }
         await delay(PAGE_DELAY_MS);
 
@@ -409,6 +409,7 @@ export class AdSyncService {
     campaignId: string,
     businessId: string,
     targeting: NonNullable<FbAdset['targeting']>,
+    accessToken: string,
   ) {
     try {
       {
@@ -426,7 +427,7 @@ export class AdSyncService {
         const narrowAudience = specGroups.slice(1).map((spec) => ({
           interests: (spec.interests ?? []).map((i) => ({ id: i.id, name: i.name })),
         }));
-        const languages = (targeting.locales ?? []).map(String);
+        const languages = await this.resolveFbLocaleNames(targeting.locales ?? [], accessToken);
         const placements = (targeting.publisher_platforms ?? [])
           .concat(targeting.facebook_positions ?? [])
           .concat(targeting.instagram_positions ?? [])
@@ -465,6 +466,31 @@ export class AdSyncService {
       }
     } catch (err) {
       this.logger.warn(`Failed to upsert FB targeting for campaign ${campaignId}: ${err}`);
+    }
+  }
+
+  /**
+   * `targeting.locales` from the adset is just an array of numeric locale IDs
+   * (e.g. [27]) — Facebook does not embed the language name like it does for
+   * interests. Resolve each ID to its display name via the adlocale search
+   * endpoint so the UI shows "Vietnamese" instead of the raw ID "27".
+   */
+  private async resolveFbLocaleNames(localeIds: number[], accessToken: string): Promise<string[]> {
+    if (localeIds.length === 0) return [];
+    try {
+      const result = await this.fbGet<{ data: Array<{ key: number; name: string }> }>(
+        `${FB_API}/search`,
+        {
+          type: 'adlocale',
+          locale_ids: JSON.stringify(localeIds),
+          access_token: accessToken,
+        },
+      );
+      const nameById = new Map(result.data.map((l) => [l.key, l.name]));
+      return localeIds.map((id) => nameById.get(id) ?? String(id));
+    } catch (err) {
+      this.logger.warn(`Failed to resolve FB locale names: ${err}`);
+      return localeIds.map(String);
     }
   }
 
