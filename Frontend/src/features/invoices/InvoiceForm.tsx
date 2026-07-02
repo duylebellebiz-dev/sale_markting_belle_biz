@@ -4,6 +4,88 @@ import { invoicesApi } from './invoicesApi';
 import { businessesApi } from '../businesses/businessesApi';
 import type { CreateInvoicePayload, UpdateInvoicePayload, Invoice } from './invoicesApi';
 
+// ── Quick-add customer mini-form ───────────────────────────────────────────
+interface QuickAddCustomerProps {
+  initialName: string;
+  onCreated: (c: Customer) => void;
+  onCancel: () => void;
+}
+
+function QuickAddCustomer({ initialName, onCreated, onCancel }: QuickAddCustomerProps) {
+  const [shopName, setShopName] = useState(initialName);
+  const [shopAddress, setShopAddress] = useState('');
+  const [phone, setPhone] = useState('');
+  const [email, setEmail] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function handleSave(e: React.FormEvent) {
+    e.preventDefault();
+    if (!shopName.trim()) { setErr('Shop name is required.'); return; }
+    setSaving(true);
+    setErr(null);
+    try {
+      const res = await api.post<Customer>('/customers', {
+        customerName: shopName.trim(),
+        shopName: shopName.trim(),
+        shopAddress: shopAddress.trim() || undefined,
+        phoneNumber: phone.trim() || undefined,
+        email: email.trim() || undefined,
+        stage: 'Lead',
+      });
+      onCreated(res.data);
+    } catch (ex: unknown) {
+      const msg = (ex as { response?: { data?: { message?: string | string[] } } })?.response?.data?.message;
+      setErr(Array.isArray(msg) ? msg.join(', ') : (msg ?? 'Could not create customer.'));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="absolute z-20 mt-1 w-full bg-white border border-indigo-300 rounded-xl shadow-xl p-4 space-y-3">
+      <p className="text-sm font-semibold text-indigo-700">Add New Customer</p>
+      {err && <p className="text-xs text-red-600">{err}</p>}
+      <div className="grid grid-cols-2 gap-2">
+        <div className="col-span-2">
+          <label className="text-xs text-gray-500 mb-0.5 block">Shop Name *</label>
+          <input autoFocus value={shopName} onChange={e => setShopName(e.target.value)}
+            className="w-full rounded-lg border border-gray-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+            placeholder="Shop / business name" />
+        </div>
+        <div>
+          <label className="text-xs text-gray-500 mb-0.5 block">Phone</label>
+          <input value={phone} onChange={e => setPhone(e.target.value)}
+            className="w-full rounded-lg border border-gray-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+            placeholder="Phone number" />
+        </div>
+        <div className="col-span-2">
+          <label className="text-xs text-gray-500 mb-0.5 block">Shop Address</label>
+          <input value={shopAddress} onChange={e => setShopAddress(e.target.value)}
+            className="w-full rounded-lg border border-gray-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+            placeholder="Street, city, province, postal code" />
+        </div>
+        <div className="col-span-2">
+          <label className="text-xs text-gray-500 mb-0.5 block">Email</label>
+          <input type="email" value={email} onChange={e => setEmail(e.target.value)}
+            className="w-full rounded-lg border border-gray-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+            placeholder="email@example.com" />
+        </div>
+      </div>
+      <div className="flex justify-end gap-2 pt-1">
+        <button type="button" onClick={onCancel}
+          className="px-3 py-1.5 text-xs rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50">
+          Cancel
+        </button>
+        <button type="button" onClick={handleSave} disabled={saving}
+          className="px-3 py-1.5 text-xs rounded-lg bg-indigo-600 text-white font-medium hover:bg-indigo-700 disabled:opacity-50">
+          {saving ? 'Saving...' : 'Save & Select'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 interface Customer {
   id: string;
   customerName: string;
@@ -96,6 +178,7 @@ export default function InvoiceForm({ initial, onSubmit, onClose }: Props) {
     return typeof initial.customerId === 'object' ? initial.customerId.id : initial.customerId;
   });
   const [selectedLabel, setSelectedLabel] = useState('');
+  const [showQuickAdd, setShowQuickAdd] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -194,6 +277,13 @@ export default function InvoiceForm({ initial, onSubmit, onClose }: Props) {
     setCustomerId('');
     setSelectedLabel('');
     setDropdownOpen(true);
+    setShowQuickAdd(false);
+  }
+
+  function handleCustomerCreated(c: Customer) {
+    setCustomers((prev) => [c, ...prev]);
+    selectCustomer(c);
+    setShowQuickAdd(false);
   }
 
   //  Line item handlers 
@@ -306,24 +396,35 @@ export default function InvoiceForm({ initial, onSubmit, onClose }: Props) {
                     className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-lg leading-none"
                   >&times;</button>
                 )}
-                {dropdownOpen && !customerId && (
+                {showQuickAdd && (
+                  <QuickAddCustomer
+                    initialName={search}
+                    onCreated={handleCustomerCreated}
+                    onCancel={() => { setShowQuickAdd(false); searchInputRef.current?.focus(); }}
+                  />
+                )}
+                {dropdownOpen && !customerId && !showQuickAdd && (
                   <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-52 overflow-y-auto">
-                    {filtered.length === 0 ? (
-                      <p className="px-3 py-2 text-sm text-gray-400">No customers found</p>
-                    ) : (
-                      filtered.map((c) => (
-                        <button
-                          key={c.id}
-                          type="button"
-                          onMouseDown={() => selectCustomer(c)}
-                          className="w-full text-left px-3 py-2 text-sm hover:bg-indigo-50 hover:text-indigo-700"
-                        >
-                          <span className="font-medium">{c.customerName}</span>
-                          {c.shopName && <span className="text-gray-500"> - {c.shopName}</span>}
-                          {c.phoneNumber && <span className="text-gray-400 ml-2 text-xs">{c.phoneNumber}</span>}
-                        </button>
-                      ))
-                    )}
+                    {filtered.map((c) => (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onMouseDown={() => selectCustomer(c)}
+                        className="w-full text-left px-3 py-2 text-sm hover:bg-indigo-50 hover:text-indigo-700"
+                      >
+                        <span className="font-medium">{c.customerName}</span>
+                        {c.shopName && <span className="text-gray-500"> - {c.shopName}</span>}
+                        {c.phoneNumber && <span className="text-gray-400 ml-2 text-xs">{c.phoneNumber}</span>}
+                      </button>
+                    ))}
+                    <button
+                      type="button"
+                      onMouseDown={() => { setDropdownOpen(false); setShowQuickAdd(true); }}
+                      className="w-full text-left px-3 py-2 text-sm text-indigo-600 font-medium hover:bg-indigo-50 border-t border-gray-100 flex items-center gap-1.5"
+                    >
+                      <span className="text-base leading-none">+</span>
+                      {search.trim() ? `Add "${search.trim()}" as new customer` : 'Add new customer'}
+                    </button>
                   </div>
                 )}
               </div>

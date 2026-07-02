@@ -156,11 +156,12 @@ export default function InvoiceBuilderPage() {
   const [loading,   setLoading]   = useState(!!id);
   const [bootErr,   setBootErr]   = useState<string | null>(null);
 
-  //  Customer combobox 
+  //  Customer combobox
   const [customerId,       setCustomerId]       = useState('');
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerOption | null>(null);
   const [custSearch,       setCustSearch]       = useState('');
   const [custDdOpen,       setCustDdOpen]       = useState(false);
+  const [showQuickAdd,     setShowQuickAdd]     = useState(false);
   const custDdRef  = useRef<HTMLDivElement>(null);
   const custInpRef = useRef<HTMLInputElement>(null);
 
@@ -300,11 +301,15 @@ export default function InvoiceBuilderPage() {
   const filteredC = custSearch ? customers.filter(c => matchC(c, custSearch)) : customers;
 
   function selectCustomer(c: CustomerOption) {
-    setCustomerId(c.id); setSelectedCustomer(c); setCustSearch(''); setCustDdOpen(false);
+    setCustomerId(c.id); setSelectedCustomer(c); setCustSearch(''); setCustDdOpen(false); setShowQuickAdd(false);
   }
   function clearCustomer() {
     setCustomerId(''); setSelectedCustomer(null); setCustSearch('');
     custInpRef.current?.focus(); setCustDdOpen(true);
+  }
+  function handleCustomerCreated(c: CustomerOption) {
+    setCustomers(prev => [c, ...prev]);
+    selectCustomer(c);
   }
 
   //  Line-item mutations 
@@ -572,18 +577,31 @@ export default function InvoiceBuilderPage() {
                     <button type="button" onClick={clearCustomer}
                       className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xl">x</button>
                   )}
-                  {custDdOpen && !selectedCustomer && (
+                  {showQuickAdd && (
+                    <QuickAddCustomer
+                      initialName={custSearch}
+                      onCreated={handleCustomerCreated}
+                      onCancel={() => { setShowQuickAdd(false); custInpRef.current?.focus(); }}
+                    />
+                  )}
+                  {custDdOpen && !selectedCustomer && !showQuickAdd && (
                     <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-lg max-h-56 overflow-y-auto">
-                      {filteredC.length === 0
-                        ? <p className="px-3 py-2 text-sm text-gray-400">No customers found</p>
-                        : filteredC.map(c => (
-                          <button key={c.id} type="button" onMouseDown={() => selectCustomer(c)}
-                            className="w-full text-left px-3 py-2.5 text-sm hover:bg-indigo-50 border-b border-gray-50 last:border-0">
-                            <span className="font-medium text-gray-900">{c.customerName}</span>
-                            {c.shopName && <span className="text-gray-500"> - {c.shopName}</span>}
-                            {c.email     && <span className="ml-2 text-xs text-gray-400">{c.email}</span>}
-                          </button>
-                        ))}
+                      {filteredC.map(c => (
+                        <button key={c.id} type="button" onMouseDown={() => selectCustomer(c)}
+                          className="w-full text-left px-3 py-2.5 text-sm hover:bg-indigo-50 border-b border-gray-50 last:border-0">
+                          <span className="font-medium text-gray-900">{c.customerName}</span>
+                          {c.shopName && <span className="text-gray-500"> - {c.shopName}</span>}
+                          {c.email     && <span className="ml-2 text-xs text-gray-400">{c.email}</span>}
+                        </button>
+                      ))}
+                      <button
+                        type="button"
+                        onMouseDown={() => { setCustDdOpen(false); setShowQuickAdd(true); }}
+                        className="w-full text-left px-3 py-2.5 text-sm text-indigo-600 font-medium hover:bg-indigo-50 border-t border-gray-100 flex items-center gap-1.5"
+                      >
+                        <span className="text-base leading-none">+</span>
+                        {custSearch.trim() ? `Add "${custSearch.trim()}" as new customer` : 'Add new customer'}
+                      </button>
                     </div>
                   )}
                   {selectedCustomer && (
@@ -1047,7 +1065,83 @@ function LineItemRow({
   );
 }
 
-//  TotalRow 
+//  QuickAddCustomer
+
+interface QuickAddCustomerProps {
+  initialName: string;
+  onCreated: (c: CustomerOption) => void;
+  onCancel: () => void;
+}
+
+function QuickAddCustomer({ initialName, onCreated, onCancel }: QuickAddCustomerProps) {
+  const [shopName,    setShopName]    = useState(initialName);
+  const [shopAddress, setShopAddress] = useState('');
+  const [phone,       setPhone]       = useState('');
+  const [email,       setEmail]       = useState('');
+  const [saving,      setSaving]      = useState(false);
+  const [err,         setErr]         = useState<string | null>(null);
+
+  async function handleSave(e: React.FormEvent) {
+    e.preventDefault();
+    if (!shopName.trim()) { setErr('Shop name is required.'); return; }
+    setSaving(true); setErr(null);
+    try {
+      const res = await api.post<CustomerOption>('/customers', {
+        customerName: shopName.trim(),
+        shopName:     shopName.trim(),
+        shopAddress:  shopAddress.trim() || undefined,
+        phoneNumber:  phone.trim()       || undefined,
+        email:        email.trim()       || undefined,
+        stage: 'Lead',
+      });
+      onCreated(res.data);
+    } catch (ex: unknown) {
+      const m = (ex as { response?: { data?: { message?: string | string[] } } })?.response?.data?.message;
+      setErr(Array.isArray(m) ? m.join(', ') : (m ?? 'Could not create customer.'));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const INP = 'w-full rounded-lg border border-gray-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400';
+
+  return (
+    <div className="absolute z-20 mt-1 w-full bg-white border border-indigo-300 rounded-xl shadow-xl p-4 space-y-3">
+      <p className="text-sm font-semibold text-indigo-700">Add New Customer</p>
+      {err && <p className="text-xs text-red-600">{err}</p>}
+      <div className="grid grid-cols-2 gap-2">
+        <div className="col-span-2">
+          <label className="text-xs text-gray-500 mb-0.5 block">Shop Name *</label>
+          <input autoFocus value={shopName} onChange={e => setShopName(e.target.value)} className={INP} placeholder="Shop / business name" />
+        </div>
+        <div>
+          <label className="text-xs text-gray-500 mb-0.5 block">Phone</label>
+          <input value={phone} onChange={e => setPhone(e.target.value)} className={INP} placeholder="Phone number" />
+        </div>
+        <div className="col-span-2">
+          <label className="text-xs text-gray-500 mb-0.5 block">Shop Address</label>
+          <input value={shopAddress} onChange={e => setShopAddress(e.target.value)} className={INP} placeholder="Street, city, province, postal code" />
+        </div>
+        <div className="col-span-2">
+          <label className="text-xs text-gray-500 mb-0.5 block">Email</label>
+          <input type="email" value={email} onChange={e => setEmail(e.target.value)} className={INP} placeholder="email@example.com" />
+        </div>
+      </div>
+      <div className="flex justify-end gap-2 pt-1">
+        <button type="button" onClick={onCancel}
+          className="px-3 py-1.5 text-xs rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50">
+          Cancel
+        </button>
+        <button type="button" onClick={handleSave} disabled={saving}
+          className="px-3 py-1.5 text-xs rounded-lg bg-indigo-600 text-white font-medium hover:bg-indigo-700 disabled:opacity-50">
+          {saving ? 'Saving...' : 'Save & Select'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+//  TotalRow
 
 function TotalRow({ label, value, bold, muted }: {
   label: string; value: string; bold?: boolean; muted?: boolean;
