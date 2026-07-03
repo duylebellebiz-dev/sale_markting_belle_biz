@@ -408,6 +408,20 @@ export default function InvoiceBuilderPage() {
     setRows(prev => prev.length > 1 ? prev.filter(r => r.id !== rowId) : prev);
   }
 
+  /** Move the dragged row to sit just before the target row. */
+  function reorderRows(draggedId: string, targetId: string) {
+    if (draggedId === targetId) return;
+    setRows(prev => {
+      const fromIdx = prev.findIndex(r => r.id === draggedId);
+      const toIdx = prev.findIndex(r => r.id === targetId);
+      if (fromIdx === -1 || toIdx === -1) return prev;
+      const next = [...prev];
+      const [moved] = next.splice(fromIdx, 1);
+      next.splice(toIdx, 0, moved);
+      return next;
+    });
+  }
+
   //  Payload 
 
   function buildPayload(): CreateInvoicePayload | null {
@@ -765,6 +779,7 @@ export default function InvoiceBuilderPage() {
               onAddRow={addRow}
               onAddServiceRow={addServiceRow}
               onRemoveRow={removeRow}
+              onReorderRows={reorderRows}
             />
           </div>
 
@@ -903,16 +918,18 @@ interface LineItemsSectionProps {
   onAddRow: () => void;
   onAddServiceRow: (svc: ServiceOption) => void;
   onRemoveRow: (id: string) => void;
+  onReorderRows: (draggedId: string, targetId: string) => void;
 }
 
 function LineItemsSection({
   rows, services, amounts,
   onUpdateRow, onApplyService, onDetachService,
-  onAddRow, onAddServiceRow, onRemoveRow,
+  onAddRow, onAddServiceRow, onRemoveRow, onReorderRows,
 }: LineItemsSectionProps) {
   const [svcSearch, setSvcSearch] = useState('');
   const [svcDdOpen, setSvcDdOpen] = useState(false);
   const svcDdRef = useRef<HTMLDivElement>(null);
+  const [draggingId, setDraggingId] = useState<string | null>(null);
 
   useEffect(() => {
     function h(e: MouseEvent) {
@@ -981,7 +998,7 @@ function LineItemsSection({
       <div className="rounded-xl border border-gray-200 overflow-visible bg-white">
         {/* Header */}
         <div className="grid bg-indigo-600 text-white text-xs font-semibold uppercase tracking-wide
-                        grid-cols-[28px_1fr_70px_90px_80px_32px] gap-1 px-3 py-2.5 rounded-t-xl">
+                        grid-cols-[44px_1fr_70px_90px_80px_32px] gap-1 px-3 py-2.5 rounded-t-xl">
           <span>#</span>
           <span>Description / Service Term</span>
           <span className="text-right">Qty</span>
@@ -999,10 +1016,17 @@ function LineItemsSection({
             amount={amounts[idx] ?? 0}
             services={services}
             canRemove={rows.length > 1}
+            dragging={draggingId === row.id}
             onUpdate={(patch) => onUpdateRow(row.id, patch)}
             onApplyService={(svc) => onApplyService(row.id, svc)}
             onDetachService={() => onDetachService(row.id)}
             onRemove={() => onRemoveRow(row.id)}
+            onDragStart={() => setDraggingId(row.id)}
+            onDragEnd={() => setDraggingId(null)}
+            onDropOn={() => {
+              if (draggingId) onReorderRows(draggingId, row.id);
+              setDraggingId(null);
+            }}
           />
         ))}
       </div>
@@ -1018,15 +1042,20 @@ interface LineItemRowProps {
   amount: number;
   services: ServiceOption[];
   canRemove: boolean;
+  dragging: boolean;
   onUpdate: (patch: Partial<Omit<LineRow, 'id'>>) => void;
   onApplyService: (svc: ServiceOption) => void;
   onDetachService: () => void;
   onRemove: () => void;
+  onDragStart: () => void;
+  onDragEnd: () => void;
+  onDropOn: () => void;
 }
 
 function LineItemRow({
-  row, idx, amount, services, canRemove,
+  row, idx, amount, services, canRemove, dragging,
   onUpdate, onApplyService, onDetachService, onRemove,
+  onDragStart, onDragEnd, onDropOn,
 }: LineItemRowProps) {
   const [svcOpen,   setSvcOpen]   = useState(false);
   const [svcSearch, setSvcSearch] = useState('');
@@ -1043,13 +1072,33 @@ function LineItemRow({
   const filteredS = svcSearch ? services.filter(s => matchS(s, svcSearch)) : services;
 
   return (
-    <div className={`relative grid grid-cols-[28px_1fr_70px_90px_80px_32px] gap-1 items-start
+    <div
+      className={`relative grid grid-cols-[44px_1fr_70px_90px_80px_32px] gap-1 items-start
                      px-3 py-2.5 border-b border-gray-100 last:border-0
                      ${svcOpen ? 'z-20' : 'z-0'}
-                     ${idx % 2 === 1 ? 'bg-gray-50' : 'bg-white'}`}>
+                     ${dragging ? 'opacity-40' : ''}
+                     ${idx % 2 === 1 ? 'bg-gray-50' : 'bg-white'}`}
+      onDragOver={e => e.preventDefault()}
+      onDrop={e => { e.preventDefault(); onDropOn(); }}
+    >
 
-      {/* # */}
-      <span className="text-xs text-gray-400 pt-2.5 text-center">{idx + 1}</span>
+      {/* Drag handle + # */}
+      <div className="flex items-center gap-1 pt-2">
+        <span
+          draggable
+          onDragStart={onDragStart}
+          onDragEnd={onDragEnd}
+          className="cursor-grab active:cursor-grabbing text-gray-300 hover:text-gray-500 transition-colors select-none"
+          title="Drag to reorder"
+        >
+          <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="currentColor">
+            <circle cx="5" cy="3" r="1.3" /><circle cx="11" cy="3" r="1.3" />
+            <circle cx="5" cy="8" r="1.3" /><circle cx="11" cy="8" r="1.3" />
+            <circle cx="5" cy="13" r="1.3" /><circle cx="11" cy="13" r="1.3" />
+          </svg>
+        </span>
+        <span className="text-xs text-gray-400 text-center">{idx + 1}</span>
+      </div>
 
       {/* Description col - contains service badge, description input, term input, and inline service picker */}
       <div className="flex flex-col gap-1.5 relative min-w-0" ref={svcRef}>
