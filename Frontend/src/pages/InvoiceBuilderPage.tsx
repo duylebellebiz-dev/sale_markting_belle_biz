@@ -120,6 +120,67 @@ function matchS(s: ServiceOption, q: string) {
   return s.name.toLowerCase().includes(q.toLowerCase());
 }
 
+// ── Inline edit customer shop name / address ───────────────────────────────
+interface EditCustomerInfoProps {
+  customer: CustomerOption;
+  onSaved: (c: CustomerOption) => void;
+  onCancel: () => void;
+}
+
+function EditCustomerInfo({ customer, onSaved, onCancel }: EditCustomerInfoProps) {
+  const [shopName, setShopName] = useState(customer.shopName ?? '');
+  const [shopAddress, setShopAddress] = useState(customer.shopAddress ?? '');
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function handleSave(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    setErr(null);
+    try {
+      const res = await api.patch<CustomerOption>(`/customers/${customer.id}`, {
+        shopName: shopName.trim(),
+        shopAddress: shopAddress.trim(),
+      });
+      onSaved({ ...customer, ...res.data });
+    } catch (ex: unknown) {
+      const m = (ex as { response?: { data?: { message?: string | string[] } } })?.response?.data?.message;
+      setErr(Array.isArray(m) ? m.join(', ') : (m ?? 'Could not update customer.'));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const INP = 'w-full rounded-lg border border-gray-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400';
+
+  return (
+    <div className="mt-3 rounded-xl border border-indigo-200 bg-indigo-50/50 p-3 space-y-2">
+      <p className="text-xs font-semibold text-indigo-700">Edit Shop Name / Address</p>
+      {err && <p className="text-xs text-red-600">{err}</p>}
+      <div>
+        <label className="text-xs text-gray-500 mb-0.5 block">Shop Name</label>
+        <input autoFocus value={shopName} onChange={(e) => setShopName(e.target.value)}
+          className={INP} placeholder="Shop / business name" />
+      </div>
+      <div>
+        <label className="text-xs text-gray-500 mb-0.5 block">Shop Address</label>
+        <input value={shopAddress} onChange={(e) => setShopAddress(e.target.value)}
+          className={INP} placeholder="Street, city, province, postal code" />
+      </div>
+      <div className="flex justify-end gap-2 pt-1">
+        <button type="button" onClick={onCancel}
+          className="px-3 py-1.5 text-xs rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50">
+          Cancel
+        </button>
+        <button type="button" onClick={handleSave} disabled={saving}
+          className="px-3 py-1.5 text-xs rounded-lg bg-indigo-600 text-white font-medium hover:bg-indigo-700 disabled:opacity-50">
+          {saving ? 'Saving...' : 'Save'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function invoiceTaxRegistrationLine(
   branding: Pick<BusinessBranding, 'gstNumber' | 'pstNumber'> | null,
   invoiceProvince?: string,
@@ -162,6 +223,7 @@ export default function InvoiceBuilderPage() {
   const [custSearch,       setCustSearch]       = useState('');
   const [custDdOpen,       setCustDdOpen]       = useState(false);
   const [showQuickAdd,     setShowQuickAdd]     = useState(false);
+  const [editingCustomerInfo, setEditingCustomerInfo] = useState(false);
   const custDdRef  = useRef<HTMLDivElement>(null);
   const custInpRef = useRef<HTMLInputElement>(null);
 
@@ -302,14 +364,20 @@ export default function InvoiceBuilderPage() {
 
   function selectCustomer(c: CustomerOption) {
     setCustomerId(c.id); setSelectedCustomer(c); setCustSearch(''); setCustDdOpen(false); setShowQuickAdd(false);
+    setEditingCustomerInfo(false);
   }
   function clearCustomer() {
-    setCustomerId(''); setSelectedCustomer(null); setCustSearch('');
+    setCustomerId(''); setSelectedCustomer(null); setCustSearch(''); setEditingCustomerInfo(false);
     custInpRef.current?.focus(); setCustDdOpen(true);
   }
   function handleCustomerCreated(c: CustomerOption) {
     setCustomers(prev => [c, ...prev]);
     selectCustomer(c);
+  }
+  function handleCustomerInfoSaved(updated: CustomerOption) {
+    setCustomers(prev => prev.map(c => (c.id === updated.id ? { ...c, ...updated } : c)));
+    setSelectedCustomer(prev => (prev ? { ...prev, ...updated } : prev));
+    setEditingCustomerInfo(false);
   }
 
   //  Line-item mutations 
@@ -546,21 +614,38 @@ export default function InvoiceBuilderPage() {
 
             {/* Bill To */}
             <div>
-              <p className={LABEL}>Bill To</p>
+              <div className="flex items-center justify-between gap-2">
+                <p className={LABEL}>Bill To</p>
+                {selectedCustomer && (
+                  <button type="button" onClick={() => setEditingCustomerInfo(v => !v)}
+                    className="text-xs text-indigo-600 hover:text-indigo-800 font-medium">
+                    {editingCustomerInfo ? 'Cancel' : 'Edit shop name / address'}
+                  </button>
+                )}
+              </div>
               {isEditing ? (
-                <AddressBlock
-                  className="mt-4"
-                  name={billToName(selectedCustomer)}
-                  address={selectedCustomer?.shopAddress}
-                  nameClassName="text-xl font-bold text-gray-900 leading-tight"
-                  lineClassName="text-sm text-gray-500 leading-6"
-                  emptyFallback={
-                    <>
-                      {selectedCustomer?.email && <p className="text-sm text-gray-500 mt-1.5">{selectedCustomer.email}</p>}
-                      {selectedCustomer?.phoneNumber && <p className="text-sm text-gray-500">{selectedCustomer.phoneNumber}</p>}
-                    </>
-                  }
-                />
+                <>
+                  <AddressBlock
+                    className="mt-4"
+                    name={billToName(selectedCustomer)}
+                    address={selectedCustomer?.shopAddress}
+                    nameClassName="text-xl font-bold text-gray-900 leading-tight"
+                    lineClassName="text-sm text-gray-500 leading-6"
+                    emptyFallback={
+                      <>
+                        {selectedCustomer?.email && <p className="text-sm text-gray-500 mt-1.5">{selectedCustomer.email}</p>}
+                        {selectedCustomer?.phoneNumber && <p className="text-sm text-gray-500">{selectedCustomer.phoneNumber}</p>}
+                      </>
+                    }
+                  />
+                  {editingCustomerInfo && selectedCustomer && (
+                    <EditCustomerInfo
+                      customer={selectedCustomer}
+                      onCancel={() => setEditingCustomerInfo(false)}
+                      onSaved={handleCustomerInfoSaved}
+                    />
+                  )}
+                </>
               ) : (
                 <div className="relative" ref={custDdRef}>
                   <input
@@ -625,6 +710,13 @@ export default function InvoiceBuilderPage() {
                           </svg>
                           Missing shop address and email
                         </p>
+                      )}
+                      {editingCustomerInfo && (
+                        <EditCustomerInfo
+                          customer={selectedCustomer}
+                          onCancel={() => setEditingCustomerInfo(false)}
+                          onSaved={handleCustomerInfoSaved}
+                        />
                       )}
                     </div>
                   )}
