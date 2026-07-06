@@ -11,7 +11,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ClaudeKeyService } from './claude-key.service';
 import { AdOAuthService } from './ad-oauth.service';
-import { summarizeAudienceContext } from './ad-analyze.service';
+import { summarizeAudienceContext, summarizeCampaignAds } from './ad-analyze.service';
 
 const CLAUDE_MODEL = 'claude-opus-4-8';
 const MIN_CAMPAIGNS = 2;
@@ -52,6 +52,7 @@ export class AdBatchAnalyzeService {
         searchTerms: { orderBy: { impressions: 'desc' }, take: 10 },
         targeting: true,
         demographics: { orderBy: { impressions: 'desc' }, take: 10 },
+        ads: { orderBy: { updatedAt: 'desc' } },
       },
     });
     if (campaigns.length !== ids.length) {
@@ -126,6 +127,7 @@ export class AdBatchAnalyzeService {
       headline: string;
       creativeText: string;
       adAccount: { provider: string; accountName: string };
+      ads: Array<{ adsetName: string; name: string; status: string; headline: string; creativeText: string; conversationTemplate: string }>;
       metrics: Array<{
         impressions: bigint;
         clicks: bigint;
@@ -147,8 +149,7 @@ export class AdBatchAnalyzeService {
         `- Name: ${c.name}`,
         `- Objective: ${c.objective || 'unspecified'}`,
         `- Status: ${c.status || 'unspecified'}`,
-        `- Headline: ${c.headline || '(none provided)'}`,
-        `- Body/creative text: ${c.creativeText || '(none provided)'}`,
+        `- Ads (every ad across every ad set): ${summarizeCampaignAds(c.ads).replace(/\n/g, ' | ')}`,
         `- Metrics: impressions ${s.impressions}, clicks ${s.clicks}, CTR ${s.ctr}, spend $${s.spend}, conversions ${s.conversions}, avg ROAS ${s.roas}`,
         `- Audience/keyword data: ${summarizeAudienceContext(c).replace(/\n/g, ' | ')}`,
       ].join('\n');

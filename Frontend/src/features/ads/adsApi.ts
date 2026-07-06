@@ -48,6 +48,23 @@ export interface CampaignMetric {
   roas: number | null;
 }
 
+// One individual ad under a campaign — a campaign can have many ad sets, each with
+// several ads with different creatives, so this is not the same as the campaign's own
+// (single, representative) headline/creativeText fields below.
+export interface CampaignAd {
+  id: string;
+  campaignId: string;
+  externalAdId: string;
+  adsetId: string;
+  adsetName: string;
+  name: string;
+  status: string;
+  headline: string;
+  creativeText: string;
+  creativeImageUrl: string;
+  conversationTemplate: string;
+}
+
 export interface Campaign {
   id: string;
   businessId: string;
@@ -65,6 +82,7 @@ export interface Campaign {
   updatedAt: string;
   adAccount: { provider: AdProvider; accountName: string; status: AdAccountStatus };
   metrics: CampaignMetric[];
+  ads: CampaignAd[];
 }
 
 export interface ImportPreviewRow {

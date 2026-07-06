@@ -3,7 +3,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ClaudeKeyService } from './claude-key.service';
-import { summarizeAudienceContext } from './ad-analyze.service';
+import { summarizeAudienceContext, summarizeCampaignAds } from './ad-analyze.service';
 
 const CLAUDE_MODEL = 'claude-sonnet-4-6';
 const MAX_HISTORY_MESSAGES = 20;
@@ -114,6 +114,7 @@ export class AdBatchChatService {
         searchTerms: { orderBy: { impressions: 'desc' }, take: 10 },
         targeting: true,
         demographics: { orderBy: { impressions: 'desc' }, take: 10 },
+        ads: { orderBy: { updatedAt: 'desc' } },
       },
     });
 
@@ -136,6 +137,7 @@ export class AdBatchChatService {
       headline: string;
       creativeText: string;
       adAccount: { provider: string; accountName: string };
+      ads: Array<{ adsetName: string; name: string; status: string; headline: string; creativeText: string; conversationTemplate: string }>;
       metrics: Array<{
         impressions: bigint;
         clicks: bigint;
@@ -161,8 +163,7 @@ export class AdBatchChatService {
         `- Name: ${campaign.name}`,
         `- Objective: ${campaign.objective || 'unspecified'}`,
         `- Status: ${campaign.status || 'unspecified'}`,
-        `- Headline: ${campaign.headline || '(none provided)'}`,
-        `- Body/creative text: ${campaign.creativeText || '(none provided)'}`,
+        `- Ads (every ad across every ad set): ${summarizeCampaignAds(campaign.ads).replace(/\n/g, ' | ')}`,
         `- Metrics: impressions ${summary.impressions}, clicks ${summary.clicks}, CTR ${summary.ctr}, spend $${summary.spend}, conversions ${summary.conversions}, avg ROAS ${summary.roas}`,
         `- Audience/keyword data: ${summarizeAudienceContext(campaign).replace(/\n/g, ' | ')}`,
       ].join('\n');

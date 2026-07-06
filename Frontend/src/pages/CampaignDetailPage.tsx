@@ -462,8 +462,42 @@ export default function CampaignDetailPage() {
               )}
             </div>
 
-            {/* Creative content */}
-            {(campaign.headline || campaign.creativeText) && (
+            {/* Creative content — every ad across every ad set, not just one */}
+            {campaign.ads.length > 0 ? (
+              <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-5 mb-6">
+                <h2 className="text-sm font-semibold text-gray-800 mb-3">
+                  Ad Content <span className="text-gray-400 font-normal">({campaign.ads.length} ad{campaign.ads.length === 1 ? '' : 's'})</span>
+                </h2>
+                <div className="space-y-4">
+                  {campaign.ads.map((ad) => (
+                    <div key={ad.id} className="border-t border-gray-100 pt-3 first:border-t-0 first:pt-0">
+                      <div className="flex items-center gap-2 flex-wrap mb-1">
+                        <p className="text-sm font-medium text-gray-900">
+                          {[ad.adsetName, ad.name].filter(Boolean).join(' / ') || '(unnamed ad)'}
+                        </p>
+                        {ad.status && (
+                          <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${statusCls(ad.status)}`}>
+                            {ad.status}
+                          </span>
+                        )}
+                      </div>
+                      {ad.headline && (
+                        <p className="text-sm font-medium text-gray-800 mb-1">{ad.headline}</p>
+                      )}
+                      {ad.creativeText && (
+                        <p className="text-sm text-gray-600 whitespace-pre-wrap">{ad.creativeText}</p>
+                      )}
+                      {ad.conversationTemplate && (
+                        <p className="text-xs text-gray-400 mt-1">Messenger/WhatsApp template: {ad.conversationTemplate}</p>
+                      )}
+                      {!ad.headline && !ad.creativeText && (
+                        <p className="text-sm text-gray-400">No creative text available.</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (campaign.headline || campaign.creativeText) && (
               <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-5 mb-6">
                 <h2 className="text-sm font-semibold text-gray-800 mb-2">Ad Content</h2>
                 {campaign.headline && (

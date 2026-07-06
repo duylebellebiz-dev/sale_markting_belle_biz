@@ -65,3 +65,5 @@ Thumbs.db
 *.njsproj
 *.sln
 *.sw?
+# CocoIndex Code (ccc)
+/.cocoindex_code/

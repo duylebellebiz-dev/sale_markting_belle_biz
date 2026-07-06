@@ -67,6 +67,14 @@ interface MetricRow {
   roas: number | null;
 }
 
+interface CampaignAdRow {
+  adsetName: string;
+  name: string;
+  status: string;
+  headline: string;
+  creativeText: string;
+}
+
 interface CampaignWithData {
   id: string;
   name: string;
@@ -77,6 +85,7 @@ interface CampaignWithData {
   startDate: Date | null;
   endDate: Date | null;
   adAccount: { provider: string; accountName: string };
+  ads: CampaignAdRow[];
   metrics: MetricRow[];
   analyses: Array<{
     contentReview: string;
@@ -121,6 +130,7 @@ export class AdReportService {
         adAccount: { select: { provider: true, accountName: true } },
         metrics: { orderBy: { date: 'asc' } },
         analyses: { orderBy: { createdAt: 'desc' }, take: 1 },
+        ads: { orderBy: { updatedAt: 'desc' } },
       },
     });
     if (!campaign) throw new NotFoundException('Campaign not found');
@@ -197,6 +207,9 @@ export class AdReportService {
     y = this.overview(doc, campaign, y);
     y += 16;
 
+    y = this.adsSection(doc, campaign, y);
+    y += 16;
+
     y = this.metricsTable(doc, campaign, y);
     y += 20;
 
@@ -266,7 +279,36 @@ export class AdReportService {
     row('Objective:', campaign.objective || '—');
     row('Status:', campaign.status || '—');
     row('Date Range:', `${fmtDate(campaign.startDate)} → ${campaign.endDate ? fmtDate(campaign.endDate) : 'ongoing'}`);
-    if (campaign.headline) row('Headline:', campaign.headline);
+
+    return y;
+  }
+
+  /** Lists every ad under the campaign (across all its ad sets) — not just one. */
+  private adsSection(doc: PDFKit.PDFDocument, campaign: CampaignWithData, startY: number): number {
+    let y = startY;
+    if (!campaign.ads.length) return y;
+
+    if (y + 40 > PH - MT) {
+      doc.addPage();
+      y = MT;
+    }
+
+    doc.font('Helvetica-Bold').fontSize(11).fillColor(G900).text('Ads', ML, y);
+    y += 16;
+
+    for (const ad of campaign.ads) {
+      if (y + 30 > PH - MT) {
+        doc.addPage();
+        y = MT;
+      }
+      const label = [ad.adsetName, ad.name].filter(Boolean).join(' / ') || '(unnamed ad)';
+      doc.font('Helvetica-Bold').fontSize(9).fillColor(G700)
+         .text(`${label}${ad.status ? ` (${ad.status})` : ''}`, ML, y, { width: CW });
+      y += 13;
+      const text = ad.headline ? `${ad.headline} — ${ad.creativeText || '(no body text)'}` : (ad.creativeText || '(no creative text)');
+      doc.font('Helvetica').fontSize(8.5).fillColor(G900).text(text, ML, y, { width: CW });
+      y += doc.heightOfString(text, { width: CW }) + 8;
+    }
 
     return y;
   }
@@ -398,6 +440,7 @@ export class AdReportService {
     workbook.creator = 'Sales Support App';
     workbook.created = new Date();
 
+    this.buildAdsSheet(workbook, campaign);
     this.buildMetricsSheet(workbook, campaign);
     this.buildAnalysisSheet(workbook, campaign);
 
@@ -484,6 +527,44 @@ export class AdReportService {
     res.setHeader('Content-Disposition', `attachment; filename="campaigns-report.xlsx"`);
     await workbook.xlsx.write(res);
     res.end();
+  }
+
+  /** One row per ad under the campaign (across all its ad sets) — not just one. */
+  private buildAdsSheet(workbook: ExcelJS.Workbook, campaign: CampaignWithData): void {
+    const sheet = workbook.addWorksheet('Ads');
+    sheet.columns = [
+      { header: 'Ad set', key: 'adsetName', width: 24 },
+      { header: 'Ad', key: 'name', width: 24 },
+      { header: 'Status', key: 'status', width: 12 },
+      { header: 'Headline', key: 'headline', width: 32 },
+      { header: 'Body / creative text', key: 'creativeText', width: 60 },
+    ];
+
+    const headerRow = sheet.getRow(1);
+    headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2563EB' } };
+    headerRow.alignment = { vertical: 'middle', horizontal: 'center' };
+    headerRow.height = 20;
+    headerRow.commit();
+
+    if (!campaign.ads.length) {
+      sheet.addRow({ adsetName: '', name: '', status: '', headline: '', creativeText: 'No ads synced yet.' });
+      return;
+    }
+
+    for (const ad of campaign.ads) {
+      sheet.addRow({
+        adsetName: ad.adsetName,
+        name: ad.name,
+        status: ad.status,
+        headline: ad.headline,
+        creativeText: ad.creativeText,
+      });
+    }
+
+    for (let i = 2; i <= sheet.rowCount; i++) {
+      sheet.getRow(i).alignment = { wrapText: true, vertical: 'top' };
+    }
   }
 
   private buildMetricsSheet(workbook: ExcelJS.Workbook, campaign: CampaignWithData): void {

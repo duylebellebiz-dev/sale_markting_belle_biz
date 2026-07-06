@@ -59,6 +59,19 @@ interface NormalizedCampaign {
   raw: object;
 }
 
+interface NormalizedAd {
+  externalAdId: string;
+  adsetId: string;
+  adsetName: string;
+  name: string;
+  status: string;
+  headline: string;
+  creativeText: string;
+  creativeImageUrl: string;
+  conversationTemplate: string;
+  raw: object;
+}
+
 interface NormalizedMetric {
   date: Date;        // UTC midnight
   impressions: bigint;
@@ -188,6 +201,7 @@ export class AdSyncService {
           orderBy: { date: 'desc' },
           ...(hasRange ? {} : { take: 30 }), // last 30 synced days when no explicit period
         },
+        ads: { orderBy: { updatedAt: 'desc' } },
       },
       orderBy: { updatedAt: 'desc' },
       // Mirrors the sync-time "newest N campaigns" cap so the page shows the same set
@@ -308,8 +322,9 @@ export class AdSyncService {
           continue;
         }
 
-        const { headline, creativeText, creativeImageUrl, conversationTemplate } =
-          await this.fetchFbCampaignCreative(fbCamp.id, accessToken);
+        const ads = await this.fetchFbCampaignAds(fbCamp.id, accessToken);
+        const representative = pickRepresentativeAd(ads);
+        const { headline, creativeText, creativeImageUrl, conversationTemplate } = representative;
         // One combined adset fetch covers both budget fallback and targeting — avoids a
         // second adset call later (which was doubling requests per campaign and tripping
         // FB's per-user rate limit).
@@ -339,6 +354,8 @@ export class AdSyncService {
 
         const campaign = await this.upsertCampaign(adAccount, norm);
         campaignsUpserted++;
+
+        await this.upsertCampaignAds(adAccount.businessId, campaign.id, ads);
 
         // Fetch daily insights for this campaign in the date window
         const since = dateFrom.toISOString().slice(0, 10);
@@ -602,49 +619,60 @@ export class AdSyncService {
   }
 
   /**
-   * Pulls the headline + primary text + creative image/reel thumbnail + any
-   * conversation (Click-to-Messenger/WhatsApp) template from one representative ad
-   * under this campaign. A campaign can hold multiple ads with different creatives —
-   * we take the first active one as a stand-in for "what this campaign's ad says"
-   * (good enough for the AI content review; users can paste alternate ad copy into
-   * the chat if needed).
+   * Pulls every ad under this campaign (across all its ad sets), each with its own
+   * headline + primary text + creative image/reel thumbnail + any conversation
+   * (Click-to-Messenger/WhatsApp) template. A campaign can hold several ad sets, each
+   * with several ads with different creatives — the caller stores all of them in
+   * CampaignAd (not just one) so content review sees the full picture.
    */
-  private async fetchFbCampaignCreative(
+  private async fetchFbCampaignAds(
     campaignId: string,
     accessToken: string,
-  ): Promise<{ headline: string; creativeText: string; creativeImageUrl: string; conversationTemplate: string }> {
+  ): Promise<NormalizedAd[]> {
     try {
-      const result = await this.fbGet<{ data: FbAd[] }>(
+      const rows = await this.fbFetchAllPages<FbAd>(
         `${FB_API}/${campaignId}/ads`,
         {
-          fields: 'creative{title,body,image_url,thumbnail_url,object_story_spec}',
-          limit: '1',
+          fields: 'id,name,status,adset{id,name},creative{title,body,image_url,thumbnail_url,object_story_spec}',
+          limit: '100',
           access_token: accessToken,
         },
       );
-      const creative = result.data[0]?.creative;
-      if (!creative) return { headline: '', creativeText: '', creativeImageUrl: '', conversationTemplate: '' };
 
-      const linkData = creative.object_story_spec?.link_data;
-      const videoData = creative.object_story_spec?.video_data;
+      return rows.map((ad) => {
+        const creative = ad.creative;
+        const linkData = creative?.object_story_spec?.link_data;
+        const videoData = creative?.object_story_spec?.video_data;
 
-      const headline = creative.title || linkData?.name || videoData?.title || '';
-      const creativeText = creative.body || linkData?.message || linkData?.description || videoData?.message || '';
-      const creativeImageUrl = creative.image_url || creative.thumbnail_url || videoData?.image_url || '';
+        const headline = creative?.title || linkData?.name || videoData?.title || '';
+        const creativeText = creative?.body || linkData?.message || linkData?.description || videoData?.message || '';
+        const creativeImageUrl = creative?.image_url || creative?.thumbnail_url || videoData?.image_url || '';
 
-      // Click-to-Messenger/WhatsApp ads route the click to a chat with a welcome
-      // message template defined on the call-to-action — surface it when present.
-      const cta = linkData?.call_to_action;
-      const conversationTemplate = cta?.value?.app_destination &&
-        ['MESSENGER', 'WHATSAPP'].includes(cta.value.app_destination)
-        ? (cta.value.message_extension_template ?? cta.value.text ?? '')
-        : '';
+        // Click-to-Messenger/WhatsApp ads route the click to a chat with a welcome
+        // message template defined on the call-to-action — surface it when present.
+        const cta = linkData?.call_to_action;
+        const conversationTemplate = cta?.value?.app_destination &&
+          ['MESSENGER', 'WHATSAPP'].includes(cta.value.app_destination)
+          ? (cta.value.message_extension_template ?? cta.value.text ?? '')
+          : '';
 
-      return { headline, creativeText, creativeImageUrl, conversationTemplate };
+        return {
+          externalAdId: ad.id,
+          adsetId: ad.adset?.id ?? '',
+          adsetName: ad.adset?.name ?? '',
+          name: ad.name ?? '',
+          status: ad.status ?? '',
+          headline,
+          creativeText,
+          creativeImageUrl,
+          conversationTemplate,
+          raw: ad as object,
+        };
+      });
     } catch (err) {
       if (err instanceof FbRateLimitExceededError) throw err;
-      this.logger.warn(`Failed to fetch ad creative for FB campaign ${campaignId}: ${err}`);
-      return { headline: '', creativeText: '', creativeImageUrl: '', conversationTemplate: '' };
+      this.logger.warn(`Failed to fetch ads for FB campaign ${campaignId}: ${err}`);
+      return [];
     }
   }
 
@@ -786,7 +814,8 @@ export class AdSyncService {
 
     for (const row of campaigns) {
       const c = row.campaign;
-      const { headline, creativeText } = await this.fetchGoogleCampaignCreative(customerId, String(c.id), headers);
+      const ads = await this.fetchGoogleCampaignAds(customerId, String(c.id), headers);
+      const { headline, creativeText } = pickRepresentativeAd(ads);
 
       const norm: NormalizedCampaign = {
         externalCampaignId: String(c.id),
@@ -806,6 +835,8 @@ export class AdSyncService {
 
       const campaign = await this.upsertCampaign(adAccount, norm);
       campaignsUpserted++;
+
+      await this.upsertCampaignAds(adAccount.businessId, campaign.id, ads);
 
       // Fetch metrics for this campaign
       let metricRows: GoogleMetricRow[] = [];
@@ -1068,31 +1099,43 @@ export class AdSyncService {
   }
 
   /**
-   * Pulls the first headline + first description from one representative responsive
-   * search ad under this campaign — Google Ads stores ad copy as arrays of assets,
-   * we take the first of each as a stand-in for "what this campaign's ad says".
+   * Pulls every responsive search ad under this campaign (across all its ad groups),
+   * each with its own headline + description — Google Ads stores ad copy as arrays of
+   * assets, we take the first headline/description of each ad. The caller stores all
+   * of them in CampaignAd (not just one representative ad).
    */
-  private async fetchGoogleCampaignCreative(
+  private async fetchGoogleCampaignAds(
     customerId: string,
     campaignId: string,
     headers: Record<string, string>,
-  ): Promise<{ headline: string; creativeText: string }> {
+  ): Promise<NormalizedAd[]> {
     try {
       const rows = await this.googleQueryAll<GoogleAdRow>(
         customerId,
-        `SELECT ad_group_ad.ad.responsive_search_ad.headlines, ad_group_ad.ad.responsive_search_ad.descriptions
+        `SELECT ad_group.id, ad_group.name, ad_group_ad.ad.id, ad_group_ad.status,
+                ad_group_ad.ad.responsive_search_ad.headlines, ad_group_ad.ad.responsive_search_ad.descriptions
          FROM ad_group_ad
-         WHERE campaign.id = ${campaignId} AND ad_group_ad.status != 'REMOVED'
-         LIMIT 1`,
+         WHERE campaign.id = ${campaignId} AND ad_group_ad.status != 'REMOVED'`,
         headers,
       );
-      const ad = rows[0]?.adGroupAd?.ad?.responsiveSearchAd;
-      const headline = ad?.headlines?.[0]?.text ?? '';
-      const creativeText = ad?.descriptions?.[0]?.text ?? '';
-      return { headline, creativeText };
+      return rows.map((row) => {
+        const rsa = row.adGroupAd?.ad?.responsiveSearchAd;
+        return {
+          externalAdId: row.adGroupAd?.ad?.id ?? '',
+          adsetId: row.adGroup?.id ?? '',
+          adsetName: row.adGroup?.name ?? '',
+          name: '',
+          status: row.adGroupAd?.status ?? '',
+          headline: rsa?.headlines?.[0]?.text ?? '',
+          creativeText: rsa?.descriptions?.[0]?.text ?? '',
+          creativeImageUrl: '',
+          conversationTemplate: '',
+          raw: row as object,
+        };
+      }).filter((ad) => ad.externalAdId);
     } catch (err) {
-      this.logger.warn(`Failed to fetch ad creative for Google campaign ${campaignId}: ${err}`);
-      return { headline: '', creativeText: '' };
+      this.logger.warn(`Failed to fetch ads for Google campaign ${campaignId}: ${err}`);
+      return [];
     }
   }
 
@@ -1208,6 +1251,45 @@ export class AdSyncService {
     });
   }
 
+  /** Upserts every ad fetched for a campaign into CampaignAd — one row per ad, not just one. */
+  private async upsertCampaignAds(businessId: string, campaignId: string, ads: NormalizedAd[]) {
+    for (const ad of ads) {
+      if (!ad.externalAdId) continue;
+      try {
+        await this.prisma.campaignAd.upsert({
+          where: { campaignId_externalAdId: { campaignId, externalAdId: ad.externalAdId } },
+          create: {
+            businessId,
+            campaignId,
+            externalAdId: ad.externalAdId,
+            adsetId: ad.adsetId,
+            adsetName: ad.adsetName,
+            name: ad.name,
+            status: ad.status,
+            headline: ad.headline,
+            creativeText: ad.creativeText,
+            creativeImageUrl: ad.creativeImageUrl,
+            conversationTemplate: ad.conversationTemplate,
+            raw: ad.raw as Prisma.InputJsonValue,
+          },
+          update: {
+            adsetId: ad.adsetId,
+            adsetName: ad.adsetName,
+            name: ad.name,
+            status: ad.status,
+            headline: ad.headline,
+            creativeText: ad.creativeText,
+            creativeImageUrl: ad.creativeImageUrl,
+            conversationTemplate: ad.conversationTemplate,
+            raw: ad.raw as Prisma.InputJsonValue,
+          },
+        });
+      } catch (err) {
+        this.logger.warn(`Failed to upsert CampaignAd ${ad.externalAdId} for campaign ${campaignId}: ${err}`);
+      }
+    }
+  }
+
   private async upsertMetric(campaignId: string, m: NormalizedMetric) {
     await this.prisma.campaignMetric.upsert({
       where: { campaignId_date: { campaignId, date: m.date } },
@@ -1298,6 +1380,10 @@ interface FbCampaign {
 }
 
 interface FbAd {
+  id: string;
+  name?: string;
+  status?: string;
+  adset?: { id?: string; name?: string };
   creative?: {
     title?: string;
     body?: string;
@@ -1374,8 +1460,11 @@ interface GoogleCampaignRow {
 }
 
 interface GoogleAdRow {
+  adGroup?: { id?: string; name?: string };
   adGroupAd?: {
+    status?: string;
     ad?: {
+      id?: string;
       responsiveSearchAd?: {
         headlines?: Array<{ text?: string }>;
         descriptions?: Array<{ text?: string }>;
@@ -1431,6 +1520,29 @@ interface GoogleMetricRow {
     costPerConversion?: string | number;
     conversionsValue?: number;
     reachMetrics?: unknown;
+  };
+}
+
+/**
+ * Picks one ad to stand in for the Campaign-level headline/creativeText/etc (kept for
+ * backward compat with the campaign summary view and any prompt that just wants "the"
+ * ad copy) — prefers the first ACTIVE ad with actual creative text, falling back to the
+ * first ad with any creative text, then the first ad at all. The full set of ads is
+ * still stored separately in CampaignAd, so this is just a convenience default.
+ */
+function pickRepresentativeAd(ads: NormalizedAd[]): {
+  headline: string;
+  creativeText: string;
+  creativeImageUrl: string;
+  conversationTemplate: string;
+} {
+  const withText = ads.filter((a) => a.headline || a.creativeText);
+  const active = withText.find((a) => a.status === 'ACTIVE') ?? withText[0] ?? ads[0];
+  return {
+    headline: active?.headline ?? '',
+    creativeText: active?.creativeText ?? '',
+    creativeImageUrl: active?.creativeImageUrl ?? '',
+    conversationTemplate: active?.conversationTemplate ?? '',
   };
 }
 

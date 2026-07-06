@@ -187,6 +187,7 @@ model Business {
   campaignSearchTerms  CampaignSearchTerm[]
   campaignTargetings   CampaignTargeting[]
   campaignDemographics CampaignDemographic[]
+  campaignAds          CampaignAd[]
   followUpHistory      FollowUpHistory[]
   invoiceActivities    InvoiceActivity[]
   gmailConnection      GmailConnection?
@@ -608,10 +609,40 @@ model Campaign {
   searchTerms  CampaignSearchTerm[]
   targeting    CampaignTargeting?
   demographics CampaignDemographic[]
+  ads          CampaignAd[]
 
   @@unique([adAccountId, externalCampaignId])
   @@index([businessId])
   @@index([adAccountId])
+}
+
+// One row per individual ad under a campaign. A campaign can hold many ad sets, each
+// with several ads with different creatives — this table stores every one of them
+// (not just a single "representative" ad) so content review and the UI can see the
+// full set of creatives running under the campaign.
+model CampaignAd {
+  id                   String   @id @default(cuid())
+  businessId           String
+  campaignId           String
+  externalAdId         String // platform's own ad ID
+  adsetId              String   @default("") // Facebook ad set / Google ad group ID
+  adsetName            String   @default("")
+  name                 String   @default("") // the ad's own name
+  status               String   @default("") // ACTIVE / PAUSED / DELETED etc.
+  headline             String   @default("")
+  creativeText         String   @default("") // primary text / body copy
+  creativeImageUrl     String   @default("") // thumbnail of the image/reel used in the ad post
+  conversationTemplate String   @default("") // Click-to-Messenger/WhatsApp template text, when used
+  raw                  Json     @default("{}")
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, externalAdId])
+  @@index([businessId])
+  @@index([campaignId])
 }
 
 // Google Ads keyword performance (Google only — Facebook has no keyword concept).

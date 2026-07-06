@@ -10,7 +10,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { PrismaService } from '../prisma/prisma.service';
 import { ClaudeKeyService } from './claude-key.service';
 import { AdOAuthService } from './ad-oauth.service';
-import { summarizeAudienceContext } from './ad-analyze.service';
+import { summarizeAudienceContext, summarizeCampaignAds } from './ad-analyze.service';
 
 const CLAUDE_MODEL = 'claude-sonnet-4-6';
 const MAX_HISTORY_MESSAGES = 20; // keep the prompt small — only the recent back-and-forth
@@ -101,6 +101,7 @@ export class AdChatService {
         searchTerms: { orderBy: { impressions: 'desc' }, take: 25 },
         targeting: true,
         demographics: { orderBy: { impressions: 'desc' }, take: 20 },
+        ads: { orderBy: { updatedAt: 'desc' } },
       },
     });
     if (!campaign) throw new NotFoundException('Campaign not found');
@@ -130,6 +131,7 @@ export class AdChatService {
     searchTerms: Array<{ term: string; impressions: bigint; clicks: bigint; spend: import('@prisma/client').Prisma.Decimal | null }>;
     targeting: { ageRanges: unknown; minAge: number | null; maxAge: number | null; genders: unknown; locations: unknown; interests: unknown; languages: unknown; placements: unknown; narrowAudience: unknown } | null;
     demographics: Array<{ ageRange: string; gender: string; region: string; impressions: bigint; clicks: bigint; spend: import('@prisma/client').Prisma.Decimal | null; conversions: number | null }>;
+    ads: Array<{ adsetName: string; name: string; status: string; headline: string; creativeText: string; conversationTemplate: string }>;
   }): string {
     return [
       'You are a helpful, expert advertising/marketing assistant helping a small business\'s sales or marketing staff with ONE specific ad campaign.',
@@ -145,13 +147,12 @@ export class AdChatService {
       `- Name: ${campaign.name}`,
       `- Objective: ${campaign.objective || 'unspecified'}`,
       `- Status: ${campaign.status || 'unspecified'}`,
-      `- Current headline: ${campaign.headline || '(none provided)'}`,
-      `- Current body/creative text: ${campaign.creativeText || '(none provided)'}`,
-      `- Image/reel used: ${campaign.creativeImageUrl || '(none provided)'}`,
-      `- Conversation (Messenger/WhatsApp) template: ${campaign.conversationTemplate || '(not used)'}`,
       `- Daily budget: ${campaign.dailyBudget != null ? campaign.dailyBudget.toString() : '(not set / set at adset level only)'}`,
       `- Lifetime budget: ${campaign.lifetimeBudget != null ? campaign.lifetimeBudget.toString() : '(not set)'}`,
       `- Date range: ${campaign.startDate?.toISOString().slice(0, 10) ?? '?'} to ${campaign.endDate?.toISOString().slice(0, 10) ?? 'ongoing'}`,
+      '',
+      'Ads in this campaign (every ad across every ad set, not just one):',
+      summarizeCampaignAds(campaign.ads),
       '',
       'Audience / keyword data:',
       summarizeAudienceContext(campaign),

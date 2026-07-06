@@ -39,6 +39,7 @@ export class AdAnalyzeService {
         searchTerms: { orderBy: { impressions: 'desc' }, take: 25 },
         targeting: true,
         demographics: { orderBy: { impressions: 'desc' }, take: 20 },
+        ads: { orderBy: { updatedAt: 'desc' } },
       },
     });
     if (!campaign) throw new NotFoundException('Campaign not found');
@@ -151,9 +152,11 @@ export class AdAnalyzeService {
     searchTerms: Array<{ term: string; impressions: bigint; clicks: bigint; spend: Prisma.Decimal | null }>;
     targeting: { ageRanges: unknown; minAge: number | null; maxAge: number | null; genders: unknown; locations: unknown; interests: unknown; languages: unknown; placements: unknown; narrowAudience: unknown } | null;
     demographics: Array<{ ageRange: string; gender: string; region: string; impressions: bigint; clicks: bigint; spend: Prisma.Decimal | null; conversions: number | null }>;
+    ads: Array<{ adsetName: string; name: string; status: string; headline: string; creativeText: string; conversationTemplate: string }>;
   }): string {
     const summary = this.summarizeMetrics(campaign.metrics);
     const audienceContext = summarizeAudienceContext(campaign);
+    const adsContext = summarizeCampaignAds(campaign.ads);
 
     const lines = [
       'You are analyzing one advertising campaign for a small business. Respond with ONLY a single JSON object — no markdown fences, no commentary before or after.',
@@ -161,7 +164,7 @@ export class AdAnalyzeService {
       'JSON shape (exact keys):',
       '{"contentReview": string, "performanceAnalysis": string, "audienceAnalysis": string, "recommendations": string[]}',
       '',
-      '— contentReview: feedback on the ad copy/creative (headline + body text). If no creative text is available, say so briefly.',
+      '— contentReview: feedback on the ad copy/creative across ALL the ads listed below (this campaign may run several ad sets, each with multiple ads/creatives) — comment on each distinct one, not just the first. If no creative text is available, say so briefly.',
       '— performanceAnalysis: what the metrics say — CTR, CPC, CPA, ROAS, trend over the period, any wasted spend.',
       '— audienceAnalysis: deep read on the customer segment / targeting. For Google: which keywords and search terms are driving (or wasting) spend, and what new keywords/negative keywords to consider. For Facebook: which age/gender/location/interest segments perform best or worst, and how to refine targeting. If no keyword/targeting data is available, say so briefly.',
       '— recommendations: 3-6 concrete, specific next steps (budget, targeting, creative, keyword changes).',
@@ -171,13 +174,12 @@ export class AdAnalyzeService {
       `- Name: ${campaign.name}`,
       `- Objective: ${campaign.objective || 'unspecified'}`,
       `- Status: ${campaign.status || 'unspecified'}`,
-      `- Headline: ${campaign.headline || '(none provided)'}`,
-      `- Body / creative text: ${campaign.creativeText || '(none provided)'}`,
-      `- Image/reel used: ${campaign.creativeImageUrl || '(none provided)'}`,
-      `- Conversation (Messenger/WhatsApp) template: ${campaign.conversationTemplate || '(not used)'}`,
       `- Daily budget: ${campaign.dailyBudget != null ? campaign.dailyBudget.toString() : '(not set / set at adset level only)'}`,
       `- Lifetime budget: ${campaign.lifetimeBudget != null ? campaign.lifetimeBudget.toString() : '(not set)'}`,
       `- Date range: ${campaign.startDate?.toISOString().slice(0, 10) ?? '?'} to ${campaign.endDate?.toISOString().slice(0, 10) ?? 'ongoing'}`,
+      '',
+      'Ads in this campaign (every ad across every ad set, not just one):',
+      adsContext,
       '',
       'Metrics summary (aggregated over the available period, not raw daily rows):',
       summary,
@@ -406,4 +408,26 @@ export function summarizeAudienceContext(campaign: {
 function jsonList(v: unknown): string {
   if (Array.isArray(v) && v.length) return v.map(String).join(', ');
   return 'n/a';
+}
+
+/**
+ * Renders every ad stored for a campaign (across all its ad sets) into a compact text
+ * block for AI prompts — a campaign can hold many ad sets, each with several ads with
+ * different creatives, so content review must see all of them, not just one.
+ */
+export function summarizeCampaignAds(
+  ads: Array<{ adsetName: string; name: string; status: string; headline: string; creativeText: string; conversationTemplate: string }>,
+): string {
+  if (!ads.length) return '(no ads synced yet)';
+
+  return ads
+    .map((ad, i) => {
+      const label = [ad.adsetName, ad.name].filter(Boolean).join(' / ') || `Ad ${i + 1}`;
+      const parts = [`${i + 1}. ${label}${ad.status ? ` (${ad.status})` : ''}`];
+      parts.push(`   - Headline: ${ad.headline || '(none)'}`);
+      parts.push(`   - Body / creative text: ${ad.creativeText || '(none)'}`);
+      if (ad.conversationTemplate) parts.push(`   - Conversation (Messenger/WhatsApp) template: ${ad.conversationTemplate}`);
+      return parts.join('\n');
+    })
+    .join('\n');
 }
