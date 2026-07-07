@@ -249,7 +249,11 @@ function compactDateForFilename(d?: string | Date | null): string {
 
 function sanitizeFilenamePart(value?: string | null): string {
   const cleaned = (value ?? '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')  // strip accents, e.g. Vietnamese diacritics
+    .replace(/[đĐ]/g, (c) => (c === 'đ' ? 'd' : 'D')) // đ has no combining-mark decomposition
     .replace(/[<>:"/\\|?*\x00-\x1F]/g, ' ')
+    .replace(/[^\x20-\x7E]/g, ' ')    // Content-Disposition must stay Latin1/ASCII-safe
     .replace(/\s+/g, ' ')
     .trim();
   return cleaned || 'Invoice';
@@ -512,6 +516,13 @@ export class InvoicePdfService {
     const items: any[] = inv.lineItems ?? [];
 
     items.forEach((item: any, idx: number) => {
+      const serviceName: string = item.service?.name ?? '';
+
+      doc.font('Helvetica-Bold').fontSize(8.5);
+      const nameH = serviceName
+        ? doc.heightOfString(serviceName, { width: TC.desc.w - 8 }) + 2
+        : 0;
+
       doc.font('Helvetica').fontSize(9);
       const descH = doc.heightOfString(item.description ?? '', { width: TC.desc.w - 8 });
 
@@ -522,7 +533,7 @@ export class InvoicePdfService {
         termH = doc.heightOfString(termText, { width: TC.desc.w - 8 }) + 3;
       }
 
-      const rowH = Math.max(MIN_ROW_H, descH + termH + ROW_PAD * 2);
+      const rowH = Math.max(MIN_ROW_H, nameH + descH + termH + ROW_PAD * 2);
 
       if (y + rowH > PAGE_BREAK) {
         doc.addPage();
@@ -539,15 +550,22 @@ export class InvoicePdfService {
       doc.font('Helvetica').fontSize(9).fillColor(G500)
          .text(String(idx + 1), TC.num.x + 2, ty, { width: TC.num.w - 2 });
 
+      let textY = ty;
+      if (serviceName) {
+        doc.font('Helvetica-Bold').fontSize(8.5).fillColor(G900)
+           .text(serviceName, TC.desc.x + 3, textY, { width: TC.desc.w - 8 });
+        textY += nameH;
+      }
+
       doc.font('Helvetica').fontSize(9).fillColor(G900)
-         .text(item.description ?? '', TC.desc.x + 3, ty, { width: TC.desc.w - 8, lineBreak: true });
+         .text(item.description ?? '', TC.desc.x + 3, textY, { width: TC.desc.w - 8, lineBreak: true });
 
       if (item.serviceTerm) {
         doc.font('Helvetica').fontSize(9);
         const actualDescH = doc.heightOfString(item.description ?? '', { width: TC.desc.w - 8 });
         const termText = `Service Term: ${item.serviceTerm}`;
         doc.font('Helvetica').fontSize(8).fillColor(G500)
-           .text(termText, TC.desc.x + 3, ty + actualDescH + 2, { width: TC.desc.w - 8 });
+           .text(termText, TC.desc.x + 3, textY + actualDescH + 2, { width: TC.desc.w - 8 });
       }
 
       doc.font('Helvetica').fontSize(9).fillColor(G700)
@@ -598,7 +616,7 @@ export class InvoicePdfService {
     }
 
     if ((inv.taxRate ?? 0) > 0) {
-      const taxLabel = inv.taxLabel || 'GST';
+      const taxLabel = (inv.taxLabel || 'GST').replace(/\+/g, '/'); // older invoices may have saved "GST+PST"
       row(`${taxLabel} (${inv.taxRate}%)`, n$(inv.taxAmount ?? 0));
     }
 

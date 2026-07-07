@@ -17,7 +17,10 @@ import type { RequestUser } from '../common/decorators/current-user.decorator';
 
 // ─── Relations included on every invoice response ──────────────────────────────
 const INVOICE_INCLUDE = {
-  lineItems: { orderBy: { sortOrder: 'asc' as const } },
+  lineItems: {
+    orderBy: { sortOrder: 'asc' as const },
+    include: { service: { select: { name: true } } },
+  },
   payments:  { orderBy: { date:      'asc' as const } },
   customer: {
     select: {
@@ -135,7 +138,11 @@ function compactDateForFilename(d?: string | Date | null): string {
 
 function sanitizeFilenamePart(value?: string | null): string {
   const cleaned = (value ?? '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')  // strip accents, e.g. Vietnamese diacritics
+    .replace(/[đĐ]/g, (c) => (c === 'đ' ? 'd' : 'D')) // đ has no combining-mark decomposition
     .replace(/[<>:"/\\|?*\x00-\x1F]/g, ' ')
+    .replace(/[^\x20-\x7E]/g, ' ')    // Content-Disposition must stay Latin1/ASCII-safe
     .replace(/\s+/g, ' ')
     .trim();
   return cleaned || 'Invoice';

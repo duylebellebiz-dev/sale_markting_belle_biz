@@ -6,7 +6,7 @@
  * Each line item can be:
  *   (1) picked from the company Services catalogue -> auto-fills description + rate, keeps serviceId
  *   (2) typed manually -> no serviceId
- * Both modes keep quantity, optional service term, and live-computed amount.
+ * Both modes keep a free-text description, quantity, and live-computed amount.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -19,7 +19,7 @@ import { usePermission } from '../features/staff/usePermission';
 import type { CreateInvoicePayload, Invoice } from '../features/invoices/invoicesApi';
 import type { BusinessBranding } from '../features/businesses/businessesApi';
 import api from '../lib/api';
-import { CANADA_TAX_RATES, PROVINCE_OPTIONS } from '../lib/canadaTaxRates';
+import { CANADA_TAX_RATES, PROVINCE_OPTIONS, displayTaxLabel } from '../lib/canadaTaxRates';
 
 //  Types 
 
@@ -46,7 +46,6 @@ interface LineRow {
   serviceName: string;     // display label for the badge
   // editable fields (may be overridden after auto-fill)
   description: string;
-  serviceTerm: string;
   quantity: string;
   rate: string;
 }
@@ -66,7 +65,7 @@ function today() { return new Date().toISOString().slice(0, 10); }
 function asText(value: unknown) { return typeof value === 'string' ? value : String(value ?? ''); }
 
 function blankRow(): LineRow {
-  return { id: uid(), serviceId: '', serviceName: '', description: '', serviceTerm: '', quantity: '1', rate: '' };
+  return { id: uid(), serviceId: '', serviceName: '', description: '', quantity: '1', rate: '' };
 }
 
 function rowFromService(svc: ServiceOption): LineRow {
@@ -75,7 +74,6 @@ function rowFromService(svc: ServiceOption): LineRow {
     serviceId: svc.id,
     serviceName: svc.name,
     description: svc.name,
-    serviceTerm: '',
     quantity: '1',
     rate: String(svc.price),
   };
@@ -314,8 +312,7 @@ export default function InvoiceBuilderPage() {
             id:          uid(),
             serviceId:   li.serviceId ?? '',
             serviceName: '',    // resolved after services load (see effect below)
-            description: li.description,
-            serviceTerm: li.serviceTerm ?? '',
+            description: li.serviceTerm ? `${li.description} — ${li.serviceTerm}` : li.description,
             quantity:    String(li.quantity),
             rate:        String(li.rate),
           }))
@@ -326,7 +323,7 @@ export default function InvoiceBuilderPage() {
     setAdjField(String(inv.adjustment ?? 0));
     setTaxRate(String(inv.taxRate ?? 0));
     setProvince(inv.province ?? '');
-    setTaxLabel(inv.taxLabel ?? '');
+    setTaxLabel(displayTaxLabel(inv.taxLabel));
     setCustomerNote(inv.customerNote ?? '');
     setTermsConditions(inv.termsConditions ?? '');
     setSavedId(inv.id);
@@ -441,7 +438,6 @@ export default function InvoiceBuilderPage() {
       lineItems: rows.map(r => ({
         serviceId:   r.serviceId || undefined,
         description: r.description.trim(),
-        serviceTerm: r.serviceTerm.trim() || undefined,
         quantity:    parseFloat(r.quantity) || 0,
         rate:        parseFloat(r.rate)     || 0,
       })),
@@ -828,7 +824,7 @@ export default function InvoiceBuilderPage() {
                 </div>
                 <div className={FIELD}>
                   <label className={LABEL}>
-                    {taxLabel ? `${taxLabel} Rate (%)` : 'Tax Rate (%)'}
+                    {taxLabel ? `${displayTaxLabel(taxLabel)} Rate (%)` : 'Tax Rate (%)'}
                   </label>
                   <input type="number" min="0" max="100" step="0.001"
                     value={taxRate} onChange={e => setTaxRate(e.target.value)} className={INPUT} placeholder="0" />
@@ -856,7 +852,7 @@ export default function InvoiceBuilderPage() {
                 {ship > 0 && <TotalRow label="Shipping"              value={`$${fmt(ship)}`} muted />}
                 {adj !== 0 && <TotalRow label="Adjustment"
                   value={adj > 0 ? `+$${fmt(adj)}` : `-$${fmt(Math.abs(adj))}`} muted />}
-                {tax > 0 && <TotalRow label={`${taxLabel || 'Tax'} (${tax}%)`} value={`$${fmt(taxAmt)}`} muted />}
+                {tax > 0 && <TotalRow label={`${taxLabel ? displayTaxLabel(taxLabel) : 'Tax'} (${tax}%)`} value={`$${fmt(taxAmt)}`} muted />}
                 <TotalRow label="Total" value={`$${fmt(total)}`} bold />
                 <div className="flex items-center justify-between bg-indigo-600 px-4 py-3">
                   <span className="text-sm font-bold text-white">Balance Due</span>
@@ -1100,7 +1096,7 @@ function LineItemRow({
         <span className="text-xs text-gray-400 text-center">{idx + 1}</span>
       </div>
 
-      {/* Description col - contains service badge, description input, term input, and inline service picker */}
+      {/* Description col - contains service badge, description input, and inline service picker */}
       <div className="flex flex-col gap-1.5 relative min-w-0" ref={svcRef}>
 
         {/* Service badge (when a service is linked) */}
@@ -1166,15 +1162,6 @@ function LineItemRow({
             </div>
           </div>
         )}
-
-        {/* Service term */}
-        <input
-          value={row.serviceTerm}
-          onChange={e => onUpdate({ serviceTerm: e.target.value })}
-          placeholder="Service term, e.g. June 15, 2026 - June 14, 2027"
-          maxLength={200}
-          className={`${INPUT_SM} text-xs text-gray-400 italic`}
-        />
       </div>
 
       {/* Qty */}

@@ -16,6 +16,7 @@ export const INVOICE_STATUS_LABELS: Record<InvoiceStatus, string> = {
 
 export interface LineItem {
   serviceId?: string;
+  service?: { name: string } | null; // populated by the backend join, read-only
   description: string;
   serviceTerm?: string;
   quantity: number;
@@ -91,7 +92,6 @@ export interface Invoice {
 export interface LineItemPayload {
   serviceId?: string;
   description: string;
-  serviceTerm?: string;
   quantity: number;
   rate: number;
 }

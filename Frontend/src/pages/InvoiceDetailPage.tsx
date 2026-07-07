@@ -7,6 +7,7 @@ import { invoicesApi } from '../features/invoices/invoicesApi';
 import AddressBlock from '../features/invoices/AddressBlock';
 import type { Invoice } from '../features/invoices/invoicesApi';
 import { usePermission } from '../features/staff/usePermission';
+import { displayTaxLabel } from '../lib/canadaTaxRates';
 
 //  Helpers 
 
@@ -524,6 +525,9 @@ export default function InvoiceDetailPage() {
                 <tr key={i} className="hover:bg-gray-50">
                   <td className="px-4 py-3 text-gray-400 text-xs">{i + 1}</td>
                   <td className="px-4 py-3">
+                    {item.service?.name && (
+                      <p className="text-xs font-semibold text-indigo-600">{item.service.name}</p>
+                    )}
                     <p className="font-medium text-gray-900">{item.description}</p>
                     {item.serviceTerm && (
                       <p className="text-xs text-gray-400 mt-0.5">Service Term: {item.serviceTerm}</p>
@@ -564,7 +568,7 @@ export default function InvoiceDetailPage() {
               )}
               {(invoice.taxRate ?? 0) > 0 && (
                 <div className="flex justify-between text-gray-600">
-                  <dt>{invoice.taxLabel || 'Tax'} ({invoice.taxRate}%)</dt>
+                  <dt>{invoice.taxLabel ? displayTaxLabel(invoice.taxLabel) : 'Tax'} ({invoice.taxRate}%)</dt>
                   <dd>${money(invoice.taxAmount)}</dd>
                 </div>
               )}
