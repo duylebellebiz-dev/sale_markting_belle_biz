@@ -638,8 +638,8 @@ export default function InvoiceDetailPage() {
 
         {/*  Bottom action bar  */}
         <div className="rounded-xl border border-gray-200 bg-white shadow-sm px-5 py-4 flex flex-wrap gap-3 items-center">
-          {/* Edit - Draft only */}
-          {isDraft && canInvoice && (
+          {/* Edit - any status except Paid/Cancelled */}
+          {!isPaid && !isCancelled && canInvoice && (
             <button
               onClick={() => navigate(`/invoices/${invoice.id}/edit`)}
               className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 text-sm font-medium hover:bg-gray-50 transition-colors"

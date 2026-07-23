@@ -523,6 +523,12 @@ export class InvoicesService {
 
   async update(user: RequestUser, id: string, dto: UpdateInvoiceDto) {
     const existing = await this.resolveInvoice(user, id);
+    if (existing.status === InvoiceStatus.Paid) {
+      throw new BadRequestException('Cannot edit a paid invoice');
+    }
+    if (existing.status === InvoiceStatus.Cancelled) {
+      throw new BadRequestException('Cannot edit a cancelled invoice');
+    }
     const customer = dto.customerId
       ? await this.resolveCustomer(user, dto.customerId)
       : existing.customer;

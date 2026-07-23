@@ -319,8 +319,8 @@ export default function InvoicesPage() {
                                 {/* View detail - always */}
                                 <Btn onClick={() => navigate(`/invoices/${inv.id}`)}>View</Btn>
 
-                                {/* Edit - Draft only */}
-                                {inv.status === 'Draft' && canInvoice && (
+                                {/* Edit - any status except Paid/Cancelled */}
+                                {!['Paid', 'Cancelled'].includes(inv.status) && canInvoice && (
                                   <Btn onClick={() => navigate(`/invoices/${inv.id}/edit`)}>Edit</Btn>
                                 )}
 
