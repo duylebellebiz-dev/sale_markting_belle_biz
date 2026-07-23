@@ -296,7 +296,7 @@ export default function InvoiceForm({ initial, onSubmit, onClose }: Props) {
   }
 
   function removeRow(id: string) {
-    setRows((prev) => (prev.length > 1 ? prev.filter((r) => r.id !== id) : prev));
+    setRows((prev) => (prev.length > 1 ? prev.filter((r) => r.id !== id) : [blankRow()]));
   }
 
   //  Submit 

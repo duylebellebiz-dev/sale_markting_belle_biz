@@ -308,14 +308,14 @@ function SegmentSection({
 
   const [serverCount, setServerCount] = useState<number | null>(null);
   const [serverCountLoading, setServerCountLoading] = useState(false);
+  const [segmentType, setSegmentType] = useState<SegmentType>(() => detectSegmentType(segment));
 
   function set(patch: Partial<SegmentFilter>) {
     setSegment((s) => ({ ...s, ...patch }));
   }
 
-  const segmentType = detectSegmentType(segment);
-
   function changeType(next: SegmentType) {
+    setSegmentType(next);
     setSegment((s) => {
       const base: SegmentFilter = {
         salespersonId: s.salespersonId,

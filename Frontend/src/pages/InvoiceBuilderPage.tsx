@@ -402,7 +402,7 @@ export default function InvoiceBuilderPage() {
   function addRow() { setRows(prev => [...prev, blankRow()]); }
   function addServiceRow(svc: ServiceOption) { setRows(prev => [...prev, rowFromService(svc)]); }
   function removeRow(rowId: string) {
-    setRows(prev => prev.length > 1 ? prev.filter(r => r.id !== rowId) : prev);
+    setRows(prev => prev.length > 1 ? prev.filter(r => r.id !== rowId) : [blankRow()]);
   }
 
   /** Move the dragged row to sit just before the target row. */
@@ -1011,7 +1011,7 @@ function LineItemsSection({
             idx={idx}
             amount={amounts[idx] ?? 0}
             services={services}
-            canRemove={rows.length > 1}
+            canRemove={true}
             dragging={draggingId === row.id}
             onUpdate={(patch) => onUpdateRow(row.id, patch)}
             onApplyService={(svc) => onApplyService(row.id, svc)}
