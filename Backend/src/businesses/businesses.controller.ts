@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import { UpdateClaudeKeyDto } from './dto/update-claude-key.dto';
 import { UpdateMailgunSettingsDto } from './dto/update-mailgun-settings.dto';
+import { UpdateSavedEmailsDto } from './dto/update-saved-emails.dto';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import * as path from 'path';
@@ -131,6 +132,31 @@ export class BusinessesController {
   async clearMailgunSettings(@CurrentUser() user: RequestUser) {
     const data = await this.businessesService.clearMailgunSettings(user.businessId);
     return { data, message: 'Mailgun sender settings cleared' };
+  }
+
+  // ── Saved CC/BCC quick-pick emails ──────────────────────────────────────────
+
+  /**
+   * GET /businesses/settings/saved-emails
+   * Any authenticated staff member can read these — they're used as quick-pick
+   * options when composing an email, not a sensitive setting.
+   */
+  @Get('settings/saved-emails')
+  getSavedEmails(@CurrentUser() user: RequestUser) {
+    return this.businessesService.getSavedEmails(user.businessId);
+  }
+
+  /**
+   * PATCH /businesses/settings/saved-emails
+   * Owner-only — replaces the full saved list.
+   */
+  @Roles('owner')
+  @Patch('settings/saved-emails')
+  updateSavedEmails(
+    @CurrentUser() user: RequestUser,
+    @Body() dto: UpdateSavedEmailsDto,
+  ) {
+    return this.businessesService.updateSavedEmails(user.businessId, dto);
   }
 
   /**

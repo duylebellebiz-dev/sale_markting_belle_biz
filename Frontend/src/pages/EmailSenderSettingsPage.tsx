@@ -3,6 +3,9 @@ import { useSearchParams } from 'react-router-dom';
 import AppShell from '../components/AppShell';
 import { gmailApi, type GmailStatus } from '../features/email/gmailApi';
 import { mailgunApi, type MailgunSettings } from '../features/businesses/mailgunApi';
+import { savedEmailsApi } from '../features/businesses/savedEmailsApi';
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function EmailSenderSettingsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -22,6 +25,47 @@ export default function EmailSenderSettingsPage() {
   const [savingMailgun, setSavingMailgun] = useState(false);
   const [clearingMailgun, setClearingMailgun] = useState(false);
   const [mailgunMsg, setMailgunMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // ── Saved CC/BCC quick-pick emails ─────────────────────────────────────────
+  const [savedEmails, setSavedEmails] = useState<string[] | null>(null);
+  const [newEmail, setNewEmail] = useState('');
+  const [savingEmails, setSavingEmails] = useState(false);
+  const [savedEmailsErr, setSavedEmailsErr] = useState<string | null>(null);
+
+  function loadSavedEmails() {
+    savedEmailsApi.list().then(setSavedEmails).catch(() => setSavedEmails([]));
+  }
+
+  async function persistSavedEmails(next: string[]) {
+    setSavingEmails(true);
+    setSavedEmailsErr(null);
+    try {
+      const res = await savedEmailsApi.update(next);
+      setSavedEmails(res);
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { message?: string | string[] } } })?.response?.data?.message;
+      setSavedEmailsErr(Array.isArray(msg) ? msg.join(', ') : (msg ?? 'Failed to save.'));
+    } finally {
+      setSavingEmails(false);
+    }
+  }
+
+  function handleAddSavedEmail(e: React.FormEvent) {
+    e.preventDefault();
+    const email = newEmail.trim();
+    if (!email) return;
+    if (!EMAIL_RE.test(email)) { setSavedEmailsErr('Enter a valid email address.'); return; }
+    if ((savedEmails ?? []).some((v) => v.toLowerCase() === email.toLowerCase())) {
+      setSavedEmailsErr('That email is already saved.');
+      return;
+    }
+    persistSavedEmails([...(savedEmails ?? []), email]);
+    setNewEmail('');
+  }
+
+  function handleRemoveSavedEmail(email: string) {
+    persistSavedEmails((savedEmails ?? []).filter((v) => v !== email));
+  }
 
   function loadStatus() {
     gmailApi
@@ -45,6 +89,7 @@ export default function EmailSenderSettingsPage() {
   useEffect(() => {
     loadStatus();
     loadMailgunSettings();
+    loadSavedEmails();
 
     const error = searchParams.get('error');
     const connected = searchParams.get('connected');
@@ -270,6 +315,61 @@ export default function EmailSenderSettingsPage() {
               )}
             </div>
           </form>
+        </div>
+
+        <div className="rounded-xl border border-gray-200 bg-white p-6 mb-6 shadow-sm">
+          <h2 className="text-base font-semibold text-gray-800 mb-1">Saved CC/BCC Emails</h2>
+          <p className="text-sm text-gray-500 mb-4">
+            Save frequently-used addresses (accounting, manager, ...) so anyone sending an invoice
+            or email can add them with one click instead of retyping.
+          </p>
+
+          <form onSubmit={handleAddSavedEmail} className="flex gap-2 mb-4">
+            <input
+              type="email"
+              value={newEmail}
+              onChange={(e) => setNewEmail(e.target.value)}
+              placeholder="accounting@yourshop.com"
+              className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+            <button
+              type="submit"
+              disabled={savingEmails || !newEmail.trim()}
+              className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+            >
+              Add
+            </button>
+          </form>
+
+          {savedEmailsErr && (
+            <p className="text-sm text-red-600 mb-3">{savedEmailsErr}</p>
+          )}
+
+          {savedEmails === null ? (
+            <div className="h-6 w-40 bg-gray-100 rounded animate-pulse" />
+          ) : savedEmails.length === 0 ? (
+            <p className="text-sm text-gray-400">No saved emails yet.</p>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {savedEmails.map((email) => (
+                <span
+                  key={email}
+                  className="inline-flex items-center gap-2 rounded-full bg-gray-100 border border-gray-200 px-3 py-1 text-sm text-gray-700"
+                >
+                  {email}
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveSavedEmail(email)}
+                    disabled={savingEmails}
+                    className="text-gray-400 hover:text-red-600 disabled:opacity-50"
+                    title="Remove"
+                  >
+                    &times;
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="rounded-xl border border-gray-200 bg-white p-6 mb-6 shadow-sm">

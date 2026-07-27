@@ -171,6 +171,10 @@ model Business {
   // Configurable day-offset schedules (§7.4); Json keeps them editable without schema changes
   reminderSchedule Json @default("{\"invoiceReminderDays\":[1,2,4,7,14],\"renewalReminderDays\":[30,14,7,3,1]}")
 
+  // Quick-pick CC/BCC email addresses (e.g. accounting, manager) so staff can add them
+  // to an outbound email with one click instead of retyping. Json array of strings.
+  savedCcBccEmails Json @default("[]")
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -514,6 +518,8 @@ model EmailLog {
   campaignId        String? // null for ad-hoc invoice sends
   customerId        String
   to                String
+  cc                String         @default("")
+  bcc               String         @default("")
   subject           String
   status            EmailLogStatus @default(queued)
   providerMessageId String? // message ID returned by Mailgun

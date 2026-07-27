@@ -18,4 +18,19 @@ export class SendInvoiceEmailDto {
   @IsOptional()
   @IsString()
   customBodyHtml?: string;
+
+  /** Comma-separated extra "To" recipients, in addition to the customer's own email. */
+  @IsOptional()
+  @IsString()
+  additionalTo?: string;
+
+  /** Comma-separated CC email addresses. */
+  @IsOptional()
+  @IsString()
+  cc?: string;
+
+  /** Comma-separated BCC email addresses. */
+  @IsOptional()
+  @IsString()
+  bcc?: string;
 }

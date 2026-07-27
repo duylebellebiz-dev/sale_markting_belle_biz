@@ -24,7 +24,7 @@ const DAILY_CAP = 100;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /** Parses a comma-separated email list, trimming and validating each address. */
-function parseEmailList(raw: string | undefined, label: string): string[] {
+export function parseEmailList(raw: string | undefined, label: string): string[] {
   if (!raw) return [];
   const emails = raw
     .split(',')

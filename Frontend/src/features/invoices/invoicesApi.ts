@@ -234,7 +234,14 @@ export const invoicesApi = {
 
   sendEmail: (
     id: string,
-    payload: { templateId?: string; customSubject?: string; customBodyHtml?: string } = {},
+    payload: {
+      templateId?: string;
+      customSubject?: string;
+      customBodyHtml?: string;
+      additionalTo?: string;
+      cc?: string;
+      bcc?: string;
+    } = {},
   ) =>
     api.post<{ message: string }>(`/invoices/${id}/send-email`, payload).then(d<{ message: string }>),
 

@@ -13,6 +13,7 @@ import { UpdateInvoiceDto } from './dto/update-invoice.dto';
 import { AddPaymentDto } from './dto/add-payment.dto';
 import { UpdatePromisedDateDto } from './dto/update-promised-date.dto';
 import { SendInvoiceEmailDto } from './dto/send-invoice-email.dto';
+import { parseEmailList } from '../email/email-campaign.service';
 import type { RequestUser } from '../common/decorators/current-user.decorator';
 
 // ─── Relations included on every invoice response ──────────────────────────────
@@ -914,11 +915,18 @@ export class InvoicesService {
       bodyHtml = this.defaultInvoiceHtml(invoice, ctx, bizName);
     }
 
+    const extraTo = parseEmailList(dto.additionalTo, 'To');
+    const toList = Array.from(new Set([recipientEmail, ...extraTo]));
+    const cc = parseEmailList(dto.cc, 'CC');
+    const bcc = parseEmailList(dto.bcc, 'BCC');
+
     const pdfBuffer = await this.pdfService.generateBuffer(invoice, user.businessId);
 
     const providerMessageId = await this.emailService.send({
       businessId: user.businessId,
-      to: recipientEmail,
+      to: toList,
+      cc,
+      bcc,
       subject,
       html: bodyHtml,
       attachments: [
@@ -934,7 +942,9 @@ export class InvoicesService {
       data: {
         businessId:       user.businessId,
         customerId:       invoice.customerId,
-        to:               recipientEmail,
+        to:               toList.join(', '),
+        cc:               cc.join(', '),
+        bcc:              bcc.join(', '),
         subject,
         status:           'sent',
         providerMessageId,
@@ -958,7 +968,7 @@ export class InvoicesService {
         invoiceId,
         actorUserId: user.userId,
         type: InvoiceActivityType.emailed,
-        note: `Invoice emailed to ${recipientEmail}.`,
+        note: `Invoice emailed to ${toList.join(', ')}${cc.length ? ` (cc: ${cc.join(', ')})` : ''}${bcc.length ? ` (bcc: ${bcc.join(', ')})` : ''}.`,
         balanceSnapshot: Number(invoice.balanceDue),
       });
     });

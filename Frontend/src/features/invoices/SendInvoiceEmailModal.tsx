@@ -16,6 +16,20 @@ import { invoicesApi } from './invoicesApi';
 import { emailTemplatesApi } from '../email/emailTemplatesApi';
 import type { EmailTemplate } from '../email/emailTemplatesApi';
 import { businessesApi } from '../businesses/businessesApi';
+import { savedEmailsApi } from '../businesses/savedEmailsApi';
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function invalidEmails(raw: string): string[] {
+  return raw.split(',').map((e) => e.trim()).filter((e) => e && !EMAIL_RE.test(e));
+}
+
+/** Appends an email to a comma-separated list field, avoiding duplicates. */
+function addEmailToList(current: string, email: string): string {
+  const existing = current.split(',').map((e) => e.trim()).filter(Boolean);
+  if (existing.some((e) => e.toLowerCase() === email.toLowerCase())) return current;
+  return [...existing, email].join(', ');
+}
 
 //  Variable rendering
 
@@ -61,6 +75,11 @@ export default function SendInvoiceEmailModal({ invoice, onClose, onSent }: Prop
   const [bodyHtml, setBodyHtml] = useState('');
   const [businessName, setBusinessName] = useState('');
 
+  const [additionalTo, setAdditionalTo] = useState('');
+  const [cc, setCc] = useState('');
+  const [bcc, setBcc] = useState('');
+  const [savedEmails, setSavedEmails] = useState<string[]>([]);
+
   const [tab, setTab] = useState<'edit' | 'preview'>('edit');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -89,6 +108,11 @@ export default function SendInvoiceEmailModal({ invoice, onClose, onSent }: Prop
       .catch(() => {});
   }, []);
 
+  // Load saved quick-pick CC/BCC emails on mount
+  useEffect(() => {
+    savedEmailsApi.list().then(setSavedEmails).catch(() => setSavedEmails([]));
+  }, []);
+
   // When a template is chosen, auto-fill subject + body with rendered vars
   function onTemplateChange(id: string) {
     setSelectedTemplateId(id);
@@ -106,6 +130,12 @@ export default function SendInvoiceEmailModal({ invoice, onClose, onSent }: Prop
       return;
     }
     if (!subject.trim()) { setError('Subject is required.'); return; }
+    const badTo = invalidEmails(additionalTo);
+    if (badTo.length) { setError(`Invalid recipient address(es): ${badTo.join(', ')}`); return; }
+    const badCc = invalidEmails(cc);
+    if (badCc.length) { setError(`Invalid CC address(es): ${badCc.join(', ')}`); return; }
+    const badBcc = invalidEmails(bcc);
+    if (badBcc.length) { setError(`Invalid BCC address(es): ${badBcc.join(', ')}`); return; }
     setError(null);
     setSending(true);
     try {
@@ -113,6 +143,9 @@ export default function SendInvoiceEmailModal({ invoice, onClose, onSent }: Prop
         templateId:    selectedTemplateId || undefined,
         customSubject: subject.trim(),
         customBodyHtml: bodyHtml.trim() || undefined,
+        additionalTo:  additionalTo.trim() || undefined,
+        cc:            cc.trim() || undefined,
+        bcc:           bcc.trim() || undefined,
       });
       onSent();
       onClose();
@@ -164,6 +197,66 @@ export default function SendInvoiceEmailModal({ invoice, onClose, onSent }: Prop
               </p>
             )}
           </div>
+
+          {/* Additional To */}
+          <div>
+            <label className={LABEL}>Additional Recipients (optional)</label>
+            <input
+              value={additionalTo}
+              onChange={(e) => setAdditionalTo(e.target.value)}
+              className={INPUT}
+              placeholder="another@example.com, manager@example.com"
+            />
+          </div>
+
+          {/* CC / BCC */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className={LABEL}>CC (optional)</label>
+              <input
+                value={cc}
+                onChange={(e) => setCc(e.target.value)}
+                className={INPUT}
+                placeholder="you@example.com"
+              />
+            </div>
+            <div>
+              <label className={LABEL}>BCC (optional)</label>
+              <input
+                value={bcc}
+                onChange={(e) => setBcc(e.target.value)}
+                className={INPUT}
+                placeholder="audit@example.com"
+              />
+            </div>
+          </div>
+
+          {/* Saved quick-pick emails */}
+          {savedEmails.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5 -mt-1">
+              <span className="text-xs text-gray-400 mr-1">Quick add:</span>
+              {savedEmails.map((email) => (
+                <div key={email} className="inline-flex rounded-full border border-gray-200 overflow-hidden text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setCc((v) => addEmailToList(v, email))}
+                    title={`Add ${email} to CC`}
+                    className="px-2 py-1 text-gray-600 hover:bg-indigo-50 hover:text-indigo-700 transition-colors border-r border-gray-200"
+                  >
+                    {email} <span className="text-gray-400">+CC</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBcc((v) => addEmailToList(v, email))}
+                    title={`Add ${email} to BCC`}
+                    className="px-2 py-1 text-gray-600 hover:bg-indigo-50 hover:text-indigo-700 transition-colors"
+                  >
+                    +BCC
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* Template picker */}
           <div>

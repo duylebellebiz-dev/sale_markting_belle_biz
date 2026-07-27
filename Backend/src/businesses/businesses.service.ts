@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { UpdateReminderScheduleDto } from './dto/update-reminder-schedule.dto';
 import { UpdateBrandingDto } from './dto/update-branding.dto';
 import { UpdateMailgunSettingsDto } from './dto/update-mailgun-settings.dto';
+import { UpdateSavedEmailsDto } from './dto/update-saved-emails.dto';
 import { encrypt, decrypt } from '../common/crypto';
 
 // Reusable select that strips the password hash from every Business response
@@ -243,6 +244,29 @@ export class BusinessesService {
       data: { mailgunApiKey: '', mailgunDomain: '', mailgunFromEmail: '', mailgunFromName: '' },
     });
     return this.getMailgunSettings(businessId);
+  }
+
+  // ── Saved CC/BCC quick-pick emails ──────────────────────────────────────────
+  // A short list of frequently-used addresses (accounting, manager, ...) so staff
+  // can add them to an outbound email with one click instead of retyping.
+
+  async getSavedEmails(businessId: string): Promise<string[]> {
+    const business = await this.prisma.business.findUnique({
+      where: { id: businessId },
+      select: { savedCcBccEmails: true },
+    });
+    if (!business) throw new NotFoundException('Business not found');
+    return (business.savedCcBccEmails as unknown as string[]) ?? [];
+  }
+
+  async updateSavedEmails(businessId: string, dto: UpdateSavedEmailsDto): Promise<string[]> {
+    const deduped = Array.from(new Set(dto.emails.map((e) => e.trim().toLowerCase()))).filter(Boolean);
+    const business = await this.prisma.business.update({
+      where: { id: businessId },
+      data: { savedCcBccEmails: deduped as unknown as object },
+      select: { savedCcBccEmails: true },
+    });
+    return (business.savedCcBccEmails as unknown as string[]) ?? [];
   }
 
   async updateLogo(businessId: string, logoUrl: string) {
