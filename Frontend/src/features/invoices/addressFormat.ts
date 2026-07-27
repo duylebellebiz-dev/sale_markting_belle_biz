@@ -36,7 +36,6 @@ const PROVINCE_PATTERN = new RegExp(
 );
 
 const POSTAL_CODE_PATTERN = /\b([A-Z]\d[A-Z])\s?(\d[A-Z]\d)\b/i;
-const COUNTRY_PATTERN = /\b(Canada|United States|USA|US)\b$/i;
 const STREET_SUFFIXES = new Set([
   'AVE', 'AVENUE', 'BLVD', 'BOULEVARD', 'CIR', 'CIRCLE', 'CLOSE', 'COURT', 'CRT',
   'CRES', 'CRESCENT', 'DR', 'DRIVE', 'GATE', 'GDNS', 'GROVE', 'HWY', 'HIGHWAY',
@@ -64,7 +63,10 @@ function normalizeProvince(province?: string | null) {
 }
 
 function splitStreetAndCity(prefix: string) {
-  const tokens = cleanWhitespace(prefix).split(' ').filter(Boolean);
+  const tokens = cleanWhitespace(prefix)
+    .split(' ')
+    .map((t) => t.replace(/,+$/, ''))
+    .filter(Boolean);
   let boundary = -1;
 
   for (let i = 0; i < tokens.length; i += 1) {
@@ -92,12 +94,14 @@ function splitStreetAndCity(prefix: string) {
   return { line1: prefix, city: '' };
 }
 
+const DEFAULT_COUNTRY = 'Canada';
+
 function fallbackLines(address?: string | null, country?: string) {
   const lines = (address ?? '')
     .split(/\r?\n|,\s*/)
     .map((part) => cleanWhitespace(part))
     .filter(Boolean);
-  const normalizedCountry = normalizeCountry(country);
+  const normalizedCountry = normalizeCountry(country) ?? (lines.length ? DEFAULT_COUNTRY : undefined);
   if (normalizedCountry && !lines.some((line) => line.toLowerCase() === normalizedCountry.toLowerCase())) {
     lines.push(normalizedCountry);
   }
@@ -119,13 +123,8 @@ export function formatAddressLines({ address, province, country }: FormattedAddr
     return normalizedCountry ? [normalizedCountry] : [];
   }
 
-  let working = raw;
-  let detectedCountry = normalizedCountry;
-  const countryMatch = working.match(COUNTRY_PATTERN);
-  if (countryMatch) {
-    detectedCountry = normalizeCountry(countryMatch[1]) ?? detectedCountry;
-    working = cleanWhitespace(working.slice(0, countryMatch.index));
-  }
+  const working = raw;
+  const detectedCountry = normalizedCountry;
 
   const postalMatch = working.match(POSTAL_CODE_PATTERN);
   const postalCode = postalMatch ? `${postalMatch[1].toUpperCase()} ${postalMatch[2].toUpperCase()}` : undefined;
@@ -152,12 +151,13 @@ export function formatAddressLines({ address, province, country }: FormattedAddr
   const localitySource = cleanWhitespace([between, suffix].filter(Boolean).join(' '));
 
   const { line1, city } = splitStreetAndCity(prefix);
-  const localityCity = city || localitySource;
+  const localityCity = cleanWhitespace((city || localitySource).replace(/,+/g, ',').replace(/,+$/, ''));
   const line2Parts: string[] = [];
   if (localityCity) line2Parts.push(localityCity);
   line2Parts.push([parsedProvince, postalCode].filter(Boolean).join(' '));
 
-  const lines = [line1, line2Parts.join(', '), detectedCountry]
+  const finalCountry = detectedCountry ?? DEFAULT_COUNTRY;
+  const lines = [line1, line2Parts.join(', '), finalCountry]
     .map((line) => line?.trim())
     .filter(Boolean) as string[];
 

@@ -70,7 +70,6 @@ const PROVINCE_PATTERN = new RegExp(
   'i',
 );
 const POSTAL_CODE_PATTERN = /\b([A-Z]\d[A-Z])\s?(\d[A-Z]\d)\b/i;
-const COUNTRY_PATTERN = /\b(Canada|United States|USA|US)\b$/i;
 const STREET_SUFFIXES = new Set([
   'AVE', 'AVENUE', 'BLVD', 'BOULEVARD', 'CIR', 'CIRCLE', 'CLOSE', 'COURT', 'CRT',
   'CRES', 'CRESCENT', 'DR', 'DRIVE', 'GATE', 'GDNS', 'GROVE', 'HWY', 'HIGHWAY',
@@ -160,12 +159,14 @@ function splitStreetAndCity(prefix: string) {
   return { line1: prefix, city: '' };
 }
 
+const DEFAULT_COUNTRY = 'Canada';
+
 function fallbackAddressLines(address?: string | null, country?: string) {
   const lines = (address ?? '')
     .split(/\r?\n|,\s*/)
     .map((part) => cleanWhitespace(part))
     .filter(Boolean);
-  const normalizedCountry = normalizeCountry(country);
+  const normalizedCountry = normalizeCountry(country) ?? (lines.length ? DEFAULT_COUNTRY : undefined);
   if (normalizedCountry && !lines.some((line) => line.toLowerCase() === normalizedCountry.toLowerCase())) {
     lines.push(normalizedCountry);
   }
@@ -181,13 +182,8 @@ function addressLines(address?: string | null, province?: string | null, country
     return normalizedCountry ? [normalizedCountry] : [];
   }
 
-  let working = raw;
-  let detectedCountry = normalizedCountry;
-  const countryMatch = working.match(COUNTRY_PATTERN);
-  if (countryMatch) {
-    detectedCountry = normalizeCountry(countryMatch[1]) ?? detectedCountry;
-    working = cleanWhitespace(working.slice(0, countryMatch.index));
-  }
+  const working = raw;
+  const detectedCountry = normalizedCountry;
 
   const postalMatch = working.match(POSTAL_CODE_PATTERN);
   const postalCode = postalMatch ? `${postalMatch[1].toUpperCase()} ${postalMatch[2].toUpperCase()}` : undefined;
@@ -219,7 +215,8 @@ function addressLines(address?: string | null, province?: string | null, country
   if (localityCity) line2Parts.push(localityCity);
   line2Parts.push([parsedProvince, postalCode].filter(Boolean).join(' '));
 
-  const lines = [line1, line2Parts.join(', '), detectedCountry]
+  const finalCountry = detectedCountry ?? DEFAULT_COUNTRY;
+  const lines = [line1, line2Parts.join(', '), finalCountry]
     .map((line) => line?.trim())
     .filter(Boolean) as string[];
 
