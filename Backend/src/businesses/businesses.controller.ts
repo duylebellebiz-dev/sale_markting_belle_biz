@@ -10,7 +10,7 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { UpdateClaudeKeyDto } from './dto/update-claude-key.dto';
-import { UpdateResendSettingsDto } from './dto/update-resend-settings.dto';
+import { UpdateMailgunSettingsDto } from './dto/update-mailgun-settings.dto';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import * as path from 'path';
@@ -93,44 +93,44 @@ export class BusinessesController {
     return { message: 'Claude API key saved successfully' };
   }
 
-  // ── Per-business Resend settings ────────────────────────────────────────────
-  // Each business registers its OWN Resend account/domain — own quota, own brand —
-  // instead of sharing the operator's RESEND_API_KEY / RESEND_FROM_EMAIL fallback.
+  // ── Per-business Mailgun settings ───────────────────────────────────────────
+  // Each business registers its OWN Mailgun account/domain — own quota, own brand —
+  // instead of sharing the operator's MAILGUN_API_KEY / MAILGUN_DOMAIN fallback.
 
   /**
    * GET /businesses/settings/email
-   * Returns whether a business-owned Resend key is configured, plus fromEmail/fromName.
+   * Returns whether a business-owned Mailgun key is configured, plus domain/fromEmail/fromName.
    * Never returns the key itself.
    */
   @Roles('owner')
   @Get('settings/email')
-  getResendSettings(@CurrentUser() user: RequestUser) {
-    return this.businessesService.getResendSettings(user.businessId);
+  getMailgunSettings(@CurrentUser() user: RequestUser) {
+    return this.businessesService.getMailgunSettings(user.businessId);
   }
 
   /**
    * PATCH /businesses/settings/email
-   * Owner sets/replaces their own Resend API key + verified sender. Stored encrypted.
+   * Owner sets/replaces their own Mailgun API key + sending domain. Stored encrypted.
    */
   @Roles('owner')
   @Patch('settings/email')
-  async setResendSettings(
+  async setMailgunSettings(
     @CurrentUser() user: RequestUser,
-    @Body() dto: UpdateResendSettingsDto,
+    @Body() dto: UpdateMailgunSettingsDto,
   ) {
-    const data = await this.businessesService.setResendSettings(user.businessId, dto);
-    return { data, message: 'Resend sender settings saved successfully' };
+    const data = await this.businessesService.setMailgunSettings(user.businessId, dto);
+    return { data, message: 'Mailgun sender settings saved successfully' };
   }
 
   /**
    * DELETE /businesses/settings/email
-   * Clears the business's own Resend config — sends fall back to the shared operator account.
+   * Clears the business's own Mailgun config — sends fall back to the shared operator account.
    */
   @Roles('owner')
   @Delete('settings/email')
-  async clearResendSettings(@CurrentUser() user: RequestUser) {
-    const data = await this.businessesService.clearResendSettings(user.businessId);
-    return { data, message: 'Resend sender settings cleared' };
+  async clearMailgunSettings(@CurrentUser() user: RequestUser) {
+    const data = await this.businessesService.clearMailgunSettings(user.businessId);
+    return { data, message: 'Mailgun sender settings cleared' };
   }
 
   /**

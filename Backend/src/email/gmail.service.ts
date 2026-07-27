@@ -1,6 +1,6 @@
 /**
  * Gmail API integration (§11.12) — the two-way 1:1 reply channel only.
- * NEVER used for bulk/campaign sending (that's ResendEmailService).
+ * NEVER used for bulk/campaign sending (that's MailgunEmailService).
  *
  * One Gmail mailbox is connected per Business, by the owner, via OAuth.
  * Reuses the SAME Google OAuth app credentials as Google Ads (GOOGLE_CLIENT_ID/

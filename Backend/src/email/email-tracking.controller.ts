@@ -58,20 +58,18 @@ export class EmailTrackingController {
   }
 
   // ---------------------------------------------------------------------------
-  // Public: Resend delivery/bounce/complaint webhook
-  // POST /email/webhook/resend
-  // Resend signs every request with Svix headers; we verify before processing.
+  // Public: Mailgun delivery/bounce/complaint webhook
+  // POST /email/webhook/mailgun
+  // Mailgun signs every request body with an HMAC signature block; we verify
+  // before processing.
   // ---------------------------------------------------------------------------
   @Public()
-  @Post('webhook/resend')
-  async resendWebhook(
+  @Post('webhook/mailgun')
+  async mailgunWebhook(
     @Req() req: RawBodyRequest<Request>,
   ): Promise<{ received: boolean }> {
     const rawBody = req.rawBody ?? Buffer.from(JSON.stringify(req.body));
-    return this.trackingService.handleResendWebhook(
-      rawBody,
-      req.headers as Record<string, string | string[] | undefined>,
-    );
+    return this.trackingService.handleMailgunWebhook(rawBody);
   }
 
   // ---------------------------------------------------------------------------

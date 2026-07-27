@@ -10,6 +10,7 @@ import { EmailCampaign, EmailLog, EmailLogStatus, Prisma } from '@prisma/client'
 import * as crypto from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import type { RequestUser } from '../common/decorators/current-user.decorator';
+import { normalizeMessageId } from './mailgun-email.service';
 
 // ---------------------------------------------------------------------------
 // 1×1 transparent GIF — returned for every open-pixel request
@@ -39,12 +40,22 @@ function canUpgrade(current: string, next: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// Resend webhook event payload shapes (subset we care about)
+// Mailgun webhook event payload shape (subset we care about)
+// https://documentation.mailgun.com/en/latest/user_manual.html#webhooks
 // ---------------------------------------------------------------------------
-interface ResendWebhookPayload {
-  type: string;
-  data: {
-    email_id: string;
+interface MailgunWebhookPayload {
+  signature: {
+    timestamp: string;
+    token: string;
+    signature: string;
+  };
+  'event-data': {
+    event: string;
+    message?: {
+      headers?: {
+        'message-id'?: string;
+      };
+    };
     [key: string]: unknown;
   };
 }
@@ -60,8 +71,8 @@ export class EmailTrackingService {
     private readonly config: ConfigService,
   ) {
     this.appUrl = (config.get<string>('APP_URL') ?? 'http://localhost:3000').replace(/\/$/, '');
-    // RESEND_WEBHOOK_SECRET is optional at startup — verified at request time.
-    this.webhookSecret = config.get<string>('RESEND_WEBHOOK_SECRET') ?? '';
+    // MAILGUN_WEBHOOK_SIGNING_KEY is optional at startup — verified at request time.
+    this.webhookSecret = config.get<string>('MAILGUN_WEBHOOK_SIGNING_KEY') ?? '';
   }
 
   // ---------------------------------------------------------------------------
@@ -165,39 +176,38 @@ export class EmailTrackingService {
   }
 
   // ---------------------------------------------------------------------------
-  // Resend webhook — POST /email/webhook/resend
+  // Mailgun webhook — POST /email/webhook/mailgun
+  // The signature block travels inside the JSON body itself (not headers).
   // ---------------------------------------------------------------------------
-  async handleResendWebhook(
-    rawBody: Buffer,
-    headers: Record<string, string | string[] | undefined>,
-  ): Promise<{ received: boolean }> {
-    // 1. Verify Svix signature
-    if (this.webhookSecret) {
-      this.verifySvixSignature(rawBody, headers);
-    } else {
-      this.logger.warn('RESEND_WEBHOOK_SECRET not set — skipping signature check');
-    }
-
-    // 2. Parse payload
-    let payload: ResendWebhookPayload;
+  async handleMailgunWebhook(rawBody: Buffer): Promise<{ received: boolean }> {
+    // 1. Parse payload
+    let payload: MailgunWebhookPayload;
     try {
-      payload = JSON.parse(rawBody.toString('utf-8')) as ResendWebhookPayload;
+      payload = JSON.parse(rawBody.toString('utf-8')) as MailgunWebhookPayload;
     } catch {
       throw new BadRequestException('Invalid JSON in webhook body');
     }
 
-    const emailId = payload?.data?.email_id;
-    if (!emailId) return { received: true }; // unknown format — ignore silently
+    // 2. Verify Mailgun's HMAC signature
+    if (this.webhookSecret) {
+      this.verifyMailgunSignature(payload.signature);
+    } else {
+      this.logger.warn('MAILGUN_WEBHOOK_SIGNING_KEY not set — skipping signature check');
+    }
 
     // 3. Apply the event
-    await this.applyWebhookEvent(payload.type, emailId);
+    const eventData = payload['event-data'];
+    const messageId = eventData?.message?.headers?.['message-id'];
+    if (!eventData?.event || !messageId) return { received: true }; // unknown format — ignore silently
+
+    await this.applyWebhookEvent(eventData.event, normalizeMessageId(messageId));
 
     return { received: true };
   }
 
   private async applyWebhookEvent(type: string, emailId: string): Promise<void> {
     switch (type) {
-      case 'email.delivered':
+      case 'delivered':
         // Only upgrade sent → delivered (don't downgrade opened/clicked)
         await this.prisma.emailLog.updateMany({
           where: { providerMessageId: emailId, status: EmailLogStatus.sent },
@@ -205,22 +215,22 @@ export class EmailTrackingService {
         });
         return;
 
-      case 'email.bounced':
+      case 'failed':
         await this.prisma.emailLog.updateMany({
           where: { providerMessageId: emailId },
           data: { status: EmailLogStatus.bounced, bouncedAt: new Date() },
         });
         return;
 
-      case 'email.complained':
+      case 'complained':
         await this.prisma.emailLog.updateMany({
           where: { providerMessageId: emailId },
           data: { status: EmailLogStatus.complained },
         });
         return;
 
-      case 'email.opened':
-        // Resend can also fire open events; treat same as our pixel
+      case 'opened':
+        // Mailgun can also fire open events; treat same as our pixel
         await this.prisma.emailLog.updateMany({
           where: {
             providerMessageId: emailId,
@@ -230,7 +240,7 @@ export class EmailTrackingService {
         });
         return;
 
-      case 'email.clicked':
+      case 'clicked':
         await this.prisma.emailLog.updateMany({
           where: {
             providerMessageId: emailId,
@@ -253,56 +263,32 @@ export class EmailTrackingService {
   }
 
   /**
-   * Verifies the Svix/Resend webhook signature.
-   * Throws UnauthorizedException if the signature is invalid or timestamp is stale.
+   * Verifies Mailgun's webhook HMAC signature (timestamp + token, signed with the
+   * account's HTTP webhook signing key). Throws UnauthorizedException if invalid
+   * or the timestamp is stale.
    */
-  private verifySvixSignature(
-    rawBody: Buffer,
-    headers: Record<string, string | string[] | undefined>,
-  ): void {
-    const svixId = this.getHeader(headers, 'svix-id');
-    const svixTimestamp = this.getHeader(headers, 'svix-timestamp');
-    const svixSignature = this.getHeader(headers, 'svix-signature');
-
-    if (!svixId || !svixTimestamp || !svixSignature) {
-      throw new UnauthorizedException('Missing Svix signature headers');
+  private verifyMailgunSignature(signature: MailgunWebhookPayload['signature']): void {
+    const { timestamp, token, signature: providedSignature } = signature ?? {};
+    if (!timestamp || !token || !providedSignature) {
+      throw new UnauthorizedException('Missing Mailgun signature fields');
     }
 
     // Reject requests older than 5 minutes
     const now = Math.floor(Date.now() / 1000);
-    const ts = parseInt(svixTimestamp, 10);
+    const ts = parseInt(timestamp, 10);
     if (isNaN(ts) || Math.abs(now - ts) > 300) {
       throw new UnauthorizedException('Webhook timestamp out of range');
     }
 
-    const secretBytes = Buffer.from(
-      this.webhookSecret.replace(/^whsec_/, ''),
-      'base64',
-    );
-    const signedContent = `${svixId}.${svixTimestamp}.${rawBody.toString('utf-8')}`;
     const expected = crypto
-      .createHmac('sha256', secretBytes)
-      .update(signedContent)
-      .digest('base64');
+      .createHmac('sha256', this.webhookSecret)
+      .update(`${timestamp}${token}`)
+      .digest('hex');
 
-    // Header value: "v1,<base64sig> v1,<base64sig2> …"
-    const provided = svixSignature
-      .split(' ')
-      .map((part) => part.split(',').slice(1).join(','))
-      .filter(Boolean);
-
-    const valid = provided.some(
-      (sig) => crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected)),
-    );
+    const valid =
+      expected.length === providedSignature.length &&
+      crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(providedSignature));
     if (!valid) throw new UnauthorizedException('Invalid webhook signature');
-  }
-
-  private getHeader(
-    headers: Record<string, string | string[] | undefined>,
-    name: string,
-  ): string | undefined {
-    const val = headers[name];
-    return Array.isArray(val) ? val[0] : val;
   }
 
   // ---------------------------------------------------------------------------

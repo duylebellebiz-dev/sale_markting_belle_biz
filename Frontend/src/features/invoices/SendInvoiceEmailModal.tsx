@@ -243,7 +243,7 @@ export default function SendInvoiceEmailModal({ invoice, onClose, onSent }: Prop
                 {bodyHtml ? (
                   <iframe
                     title="Email preview"
-                    srcDoc={bodyHtml}
+                    srcDoc={renderVars(bodyHtml, vars)}
                     className="w-full h-full"
                     sandbox="allow-same-origin"
                   />

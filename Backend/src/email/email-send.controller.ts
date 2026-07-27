@@ -70,7 +70,7 @@ export class EmailSendController {
   /**
    * GET /email/daily-cap
    * Returns today's usage and remaining quota so the compose UI can warn
-   * before a bulk send would hit the Resend free-tier limit (100/day).
+   * before a bulk send would hit the Mailgun free-tier limit (100/day).
    */
   @Get('daily-cap')
   async getDailyCap(@CurrentUser() user: RequestUser) {

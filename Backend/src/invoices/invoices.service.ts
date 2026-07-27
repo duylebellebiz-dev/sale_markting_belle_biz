@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { InvoiceActivityType, InvoiceStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { ResendEmailService } from '../email/resend-email.service';
+import { MailgunEmailService } from '../email/mailgun-email.service';
 import { InvoicePdfService } from './invoice-pdf.service';
 import { CreateInvoiceDto, LineItemDto } from './dto/create-invoice.dto';
 import { UpdateInvoiceDto } from './dto/update-invoice.dto';
@@ -163,7 +163,7 @@ function buildInvoicePdfFilename(invoice: any): string {
 export class InvoicesService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly emailService: ResendEmailService,
+    private readonly emailService: MailgunEmailService,
     private readonly pdfService: InvoicePdfService,
   ) {}
 
@@ -898,8 +898,8 @@ export class InvoicesService {
     let bodyHtml: string;
 
     if (dto.customSubject || dto.customBodyHtml) {
-      subject  = dto.customSubject  || `Invoice #${invoice.invoiceNumber} from ${bizName}`;
-      bodyHtml = dto.customBodyHtml || this.defaultInvoiceHtml(invoice, ctx, bizName);
+      subject  = renderTemplate(dto.customSubject  || `Invoice #${invoice.invoiceNumber} from ${bizName}`, ctx);
+      bodyHtml = renderTemplate(dto.customBodyHtml || this.defaultInvoiceHtml(invoice, ctx, bizName), ctx);
     } else if (dto.templateId) {
       const tpl = await this.prisma.emailTemplate.findFirst({
         where: { id: dto.templateId, businessId: user.businessId },

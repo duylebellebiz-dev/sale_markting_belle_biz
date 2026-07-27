@@ -2,7 +2,7 @@ import { Injectable, NotFoundException, UnprocessableEntityException } from '@ne
 import { PrismaService } from '../prisma/prisma.service';
 import { UpdateReminderScheduleDto } from './dto/update-reminder-schedule.dto';
 import { UpdateBrandingDto } from './dto/update-branding.dto';
-import { UpdateResendSettingsDto } from './dto/update-resend-settings.dto';
+import { UpdateMailgunSettingsDto } from './dto/update-mailgun-settings.dto';
 import { encrypt, decrypt } from '../common/crypto';
 
 // Reusable select that strips the password hash from every Business response
@@ -191,25 +191,31 @@ export class BusinessesService {
   }
 
 
-  // ── Per-business Resend settings ─────────────────────────────────────────────
-  // Each business registers its OWN Resend account (own quota, own verified domain)
-  // instead of sharing the operator's RESEND_API_KEY / RESEND_FROM_EMAIL.
+  // ── Per-business Mailgun settings ────────────────────────────────────────────
+  // Each business registers its OWN Mailgun account (own quota, own sending domain)
+  // instead of sharing the operator's MAILGUN_API_KEY / MAILGUN_DOMAIN / MAILGUN_FROM_EMAIL.
 
-  /** Returns whether a business-owned Resend key is configured, plus the public sender fields. */
-  async getResendSettings(businessId: string) {
+  /** Returns whether a business-owned Mailgun key is configured, plus the public sender fields. */
+  async getMailgunSettings(businessId: string) {
     const business = await this.prisma.business.findUnique({
       where: { id: businessId },
-      select: { resendApiKey: true, resendFromEmail: true, resendFromName: true },
+      select: {
+        mailgunApiKey: true,
+        mailgunDomain: true,
+        mailgunFromEmail: true,
+        mailgunFromName: true,
+      },
     });
     if (!business) throw new NotFoundException('Business not found');
     return {
-      configured: !!business.resendApiKey,
-      fromEmail: business.resendFromEmail,
-      fromName: business.resendFromName,
+      configured: !!business.mailgunApiKey,
+      domain: business.mailgunDomain,
+      fromEmail: business.mailgunFromEmail,
+      fromName: business.mailgunFromName,
     };
   }
 
-  async setResendSettings(businessId: string, dto: UpdateResendSettingsDto) {
+  async setMailgunSettings(businessId: string, dto: UpdateMailgunSettingsDto) {
     let encryptedKey: string;
     try {
       encryptedKey = encrypt(dto.apiKey);
@@ -221,21 +227,22 @@ export class BusinessesService {
     await this.prisma.business.update({
       where: { id: businessId },
       data: {
-        resendApiKey: encryptedKey,
-        resendFromEmail: dto.fromEmail,
-        resendFromName: dto.fromName ?? '',
+        mailgunApiKey: encryptedKey,
+        mailgunDomain: dto.domain,
+        mailgunFromEmail: dto.fromEmail,
+        mailgunFromName: dto.fromName ?? '',
       },
     });
-    return this.getResendSettings(businessId);
+    return this.getMailgunSettings(businessId);
   }
 
-  /** Clears the business's own Resend config so sends fall back to the shared operator account. */
-  async clearResendSettings(businessId: string) {
+  /** Clears the business's own Mailgun config so sends fall back to the shared operator account. */
+  async clearMailgunSettings(businessId: string) {
     await this.prisma.business.update({
       where: { id: businessId },
-      data: { resendApiKey: '', resendFromEmail: '', resendFromName: '' },
+      data: { mailgunApiKey: '', mailgunDomain: '', mailgunFromEmail: '', mailgunFromName: '' },
     });
-    return this.getResendSettings(businessId);
+    return this.getMailgunSettings(businessId);
   }
 
   async updateLogo(businessId: string, logoUrl: string) {

@@ -145,14 +145,21 @@ model Business {
   // Encrypted Claude API key for AI analysis (§12c.1). AES-256-GCM, never returned to frontend.
   claudeApiKey String @default("")
 
-  // Per-business Resend sender (owner registers their OWN Resend account/domain).
+  // Per-business Mailgun sender (owner registers their OWN Mailgun account/domain).
   // AES-256-GCM encrypted, never returned to frontend. Falls back to the shared
-  // RESEND_API_KEY / RESEND_FROM_EMAIL in .env when empty.
+  // MAILGUN_API_KEY / MAILGUN_DOMAIN / MAILGUN_FROM_EMAIL in .env when empty.
+  mailgunApiKey    String @default("")
+  mailgunDomain    String @default("")
+  mailgunFromEmail String @default("")
+  mailgunFromName  String @default("")
+
+  // DEPRECATED — Resend sending has been replaced by Mailgun (see MailgunEmailService).
+  // Columns kept (unused) to avoid a destructive migration on existing data.
   resendApiKey    String @default("")
   resendFromEmail String @default("")
   resendFromName  String @default("")
 
-  // DEPRECATED — SMTP sending has been replaced by Resend (see ResendEmailService).
+  // DEPRECATED — SMTP sending has been replaced by Mailgun (see MailgunEmailService).
   // Columns kept (unused) to avoid a destructive migration on existing data.
   smtpHost     String  @default("")
   smtpPort     Int     @default(587)
@@ -509,11 +516,11 @@ model EmailLog {
   to                String
   subject           String
   status            EmailLogStatus @default(queued)
-  providerMessageId String? // message ID returned by Resend
+  providerMessageId String? // message ID returned by Mailgun
   sentAt            DateTime?
   openedAt          DateTime? // set by tracking pixel (§11.8)
   clickedAt         DateTime? // set by redirect click tracking (§11.8)
-  bouncedAt         DateTime? // set by Resend webhook (§11.8)
+  bouncedAt         DateTime? // set by Mailgun webhook (§11.8)
   createdAt         DateTime       @default(now())
   updatedAt         DateTime       @updatedAt
 
@@ -529,7 +536,7 @@ model EmailLog {
 }
 
 // One Gmail mailbox connected per Business (§11.12). Used ONLY for the
-// two-way 1:1 reply channel — never for bulk/campaign sending (that's Resend).
+// two-way 1:1 reply channel — never for bulk/campaign sending (that's Mailgun).
 model GmailConnection {
   id             String                @id @default(cuid())
   businessId     String                @unique

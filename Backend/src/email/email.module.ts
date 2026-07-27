@@ -3,7 +3,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
 import { EmailTemplateService } from './email-template.service';
 import { EmailCampaignService } from './email-campaign.service';
 import { EmailTrackingService } from './email-tracking.service';
-import { ResendEmailService } from './resend-email.service';
+import { MailgunEmailService } from './mailgun-email.service';
 import { GmailService } from './gmail.service';
 import { EmailThreadsService } from './email-threads.service';
 import { EmailTemplatesController } from './email-templates.controller';
@@ -25,7 +25,7 @@ import { EmailThreadsController } from './email-threads.controller';
     EmailTemplateService,
     EmailCampaignService,
     EmailTrackingService,
-    ResendEmailService,
+    MailgunEmailService,
     GmailService,
     EmailThreadsService,
   ],
@@ -33,7 +33,7 @@ import { EmailThreadsController } from './email-threads.controller';
     EmailTemplateService,
     EmailCampaignService,
     EmailTrackingService,
-    ResendEmailService,
+    MailgunEmailService,
     GmailService,
   ],
 })
