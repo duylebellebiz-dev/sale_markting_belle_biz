@@ -278,6 +278,12 @@ export class EmailCampaignService {
       return { sent: 0, deferred: queuedLogs.length };
     }
 
+    const business = await this.prisma.business.findUnique({
+      where: { id: campaign.businessId },
+      select: { businessName: true },
+    });
+    const businessName = business?.businessName ?? '';
+
     const toSend = queuedLogs.slice(0, remaining);
     const deferred = queuedLogs.length - toSend.length;
 
@@ -301,11 +307,16 @@ export class EmailCampaignService {
         customer_name: customer?.customerName ?? '',
         shop_name: customer?.shopName ?? '',
         salesperson_name: salesperson,
-        // invoice_amount, service_name, expiry_date are not available at bulk-send
-        // time so they render as empty strings.
+        business_name: businessName,
+        // invoice_amount, service_name, expiry_date, invoice_number are not
+        // available at bulk-send time so they render as empty strings.
       };
 
-      // 1. Personalise variables
+      // 1. Personalise variables (body AND subject — both may contain tokens)
+      const renderedSubject = this.emailTemplateService.renderTemplate(
+        campaign.subject,
+        context,
+      );
       const renderedHtml = this.emailTemplateService.renderTemplate(
         campaign.bodyHtml,
         context,
@@ -323,7 +334,7 @@ export class EmailCampaignService {
           to: log.to,
           cc: campaign.cc,
           bcc: campaign.bcc,
-          subject: campaign.subject,
+          subject: renderedSubject,
           html: trackedHtml,
           attachments: attachmentBuffers,
         });

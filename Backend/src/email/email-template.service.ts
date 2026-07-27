@@ -23,6 +23,8 @@ export interface TemplateContext {
   expiry_date?: string;
   shop_name?: string;
   salesperson_name?: string;
+  invoice_number?: string;
+  business_name?: string;
   [key: string]: string | undefined;
 }
 

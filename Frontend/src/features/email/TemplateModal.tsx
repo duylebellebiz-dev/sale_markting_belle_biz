@@ -25,6 +25,7 @@ export default function TemplateModal({ initial, onSave, onClose }: Props) {
   const [type, setType] = useState<TemplateType>(initial?.type ?? 'custom');
   const [subject, setSubject] = useState(initial?.subject ?? '');
   const [bodyHtml, setBodyHtml] = useState(initial?.bodyHtml ?? '');
+  const [bodyMode, setBodyMode] = useState<'rich' | 'html'>('rich');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -178,15 +179,45 @@ export default function TemplateModal({ initial, onSave, onClose }: Props) {
 
           {/* Body */}
           <div>
-            <label className={LABEL}>Body *</label>
+            <div className="flex items-center justify-between mb-1">
+              <label className={LABEL + ' mb-0'}>Body *</label>
+              <div className="flex rounded-lg overflow-hidden border border-gray-200 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setBodyMode('rich')}
+                  className={`px-3 py-1.5 font-medium transition-colors ${bodyMode === 'rich' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+                >
+                  Rich Text
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBodyMode('html')}
+                  className={`px-3 py-1.5 font-medium transition-colors ${bodyMode === 'html' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+                >
+                  HTML Source
+                </button>
+              </div>
+            </div>
             <p className="text-xs text-gray-400 mb-2">
-              Use the toolbar to format text, insert images, add a CTA button, or pick a variable. Variables are highlighted as plain text and replaced at send time.
+              {bodyMode === 'rich'
+                ? 'Use the toolbar to format text, insert images, add a CTA button, or pick a variable. Variables are highlighted as plain text and replaced at send time.'
+                : 'Write or paste raw HTML directly — it is used as the actual email content. Switch back to Rich Text to see it rendered.'}
             </p>
-            <RichTextEditor
-              value={bodyHtml}
-              onChange={setBodyHtml}
-              placeholder="Write your email body…"
-            />
+            {bodyMode === 'rich' ? (
+              <RichTextEditor
+                value={bodyHtml}
+                onChange={setBodyHtml}
+                placeholder="Write your email body…"
+              />
+            ) : (
+              <textarea
+                value={bodyHtml}
+                onChange={(e) => setBodyHtml(e.target.value)}
+                rows={14}
+                placeholder="<p>Dear {customer_name},</p><p>Please find your invoice attached...</p>"
+                className={`${INPUT} resize-y font-mono text-xs`}
+              />
+            )}
           </div>
 
           {/* Preview note */}
@@ -197,7 +228,9 @@ export default function TemplateModal({ initial, onSave, onClose }: Props) {
             <code className="bg-amber-100 rounded px-1">{'{salesperson_name}'}</code>{' '}
             <code className="bg-amber-100 rounded px-1">{'{invoice_amount}'}</code>{' '}
             <code className="bg-amber-100 rounded px-1">{'{service_name}'}</code>{' '}
-            <code className="bg-amber-100 rounded px-1">{'{expiry_date}'}</code>
+            <code className="bg-amber-100 rounded px-1">{'{expiry_date}'}</code>{' '}
+            <code className="bg-amber-100 rounded px-1">{'{invoice_number}'}</code>{' '}
+            <code className="bg-amber-100 rounded px-1">{'{business_name}'}</code>
           </div>
         </form>
 

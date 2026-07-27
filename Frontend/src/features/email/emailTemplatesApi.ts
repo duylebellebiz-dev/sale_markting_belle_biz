@@ -52,6 +52,8 @@ export const VARIABLES = [
   { token: '{invoice_amount}', label: 'Invoice Amount' },
   { token: '{service_name}',   label: 'Service Name' },
   { token: '{expiry_date}',    label: 'Expiry Date' },
+  { token: '{invoice_number}', label: 'Invoice Number' },
+  { token: '{business_name}',  label: 'Business Name' },
 ] as const;
 
 export type VariableToken = typeof VARIABLES[number]['token'];
