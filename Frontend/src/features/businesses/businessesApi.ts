@@ -36,6 +36,10 @@ export interface UpdateBrandingPayload {
 const d = <T>(res: { data: T }) => res.data;
 
 export const businessesApi = {
+  // Available to any authenticated user (owner or salesperson), unlike getBranding
+  // which is owner-only. Used where only the business name is needed, e.g. email variables.
+  getMe: () => api.get<BusinessBranding>('/businesses/me').then(d<BusinessBranding>),
+
   getBranding: () =>
     api.get<BusinessBranding>('/businesses/branding').then(d<BusinessBranding>),
 

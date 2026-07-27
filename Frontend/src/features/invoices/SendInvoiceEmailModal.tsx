@@ -15,14 +15,15 @@ import type { Invoice } from './invoicesApi';
 import { invoicesApi } from './invoicesApi';
 import { emailTemplatesApi } from '../email/emailTemplatesApi';
 import type { EmailTemplate } from '../email/emailTemplatesApi';
+import { businessesApi } from '../businesses/businessesApi';
 
-//  Variable rendering 
+//  Variable rendering
 
 function renderVars(text: string, vars: Record<string, string>): string {
   return text.replace(/\{(\w+)\}/g, (_, k) => vars[k] ?? '');
 }
 
-function buildVars(inv: Invoice): Record<string, string> {
+function buildVars(inv: Invoice, businessName: string): Record<string, string> {
   const customerObj = typeof inv.customerId === 'object' ? inv.customerId : null;
   return {
     customer_name:    inv.billTo?.name || customerObj?.customerName || 'Valued Customer',
@@ -31,6 +32,8 @@ function buildVars(inv: Invoice): Record<string, string> {
     service_name:     inv.lineItems?.[0]?.description || '',
     expiry_date:      '',
     salesperson_name: '',
+    invoice_number:   inv.invoiceNumber || '',
+    business_name:    businessName,
   };
 }
 
@@ -56,12 +59,13 @@ export default function SendInvoiceEmailModal({ invoice, onClose, onSent }: Prop
   const [selectedTemplateId, setSelectedTemplateId] = useState('');
   const [subject, setSubject] = useState('');
   const [bodyHtml, setBodyHtml] = useState('');
+  const [businessName, setBusinessName] = useState('');
 
   const [tab, setTab] = useState<'edit' | 'preview'>('edit');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const vars = buildVars(invoice);
+  const vars = buildVars(invoice, businessName);
   const recipientEmail =
     invoice.billTo?.email ||
     (typeof invoice.customerId === 'object' ? (invoice.customerId as any).email : '') ||
@@ -76,6 +80,13 @@ export default function SendInvoiceEmailModal({ invoice, onClose, onSent }: Prop
       .then(setTemplates)
       .catch(() => setTemplates([]))
       .finally(() => setLoadingTpls(false));
+  }, []);
+
+  // Load business name on mount (needed for the {business_name} variable)
+  useEffect(() => {
+    businessesApi.getMe()
+      .then((res) => setBusinessName(res.businessName))
+      .catch(() => {});
   }, []);
 
   // When a template is chosen, auto-fill subject + body with rendered vars
@@ -190,6 +201,8 @@ export default function SendInvoiceEmailModal({ invoice, onClose, onSent }: Prop
                 ['{shop_name}', vars.shop_name || '(empty)'],
                 ['{invoice_amount}', vars.invoice_amount],
                 ['{service_name}', vars.service_name || '(empty)'],
+                ['{invoice_number}', vars.invoice_number || '(empty)'],
+                ['{business_name}', vars.business_name || '(empty)'],
               ].map(([token, val]) => (
                 <span key={token}>{token} <span className="text-blue-400">{'->'} {val}</span></span>
               ))}
@@ -202,7 +215,7 @@ export default function SendInvoiceEmailModal({ invoice, onClose, onSent }: Prop
             <input
               value={subject}
               onChange={(e) => setSubject(e.target.value)}
-              placeholder="Invoice #{invoice.invoiceNumber} from {business_name}"
+              placeholder="Invoice #{invoice_number} from {business_name}"
               className={INPUT}
               maxLength={300}
             />

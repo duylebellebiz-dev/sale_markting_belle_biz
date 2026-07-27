@@ -892,6 +892,8 @@ export class InvoicesService {
       service_name:     firstItem?.description || '',
       expiry_date:      '',
       salesperson_name: '',
+      invoice_number:   invoice.invoiceNumber,
+      business_name:    bizName,
     };
 
     let subject: string;
