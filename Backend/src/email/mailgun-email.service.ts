@@ -33,6 +33,7 @@ export class MailgunEmailService {
   private readonly sharedApiKey: string;
   private readonly sharedDomain: string;
   private readonly sharedFromEmail: string;
+  private readonly sharedFromName: string;
   private readonly fallbackReplyTo: string;
   private readonly logger = new Logger(MailgunEmailService.name);
 
@@ -46,6 +47,7 @@ export class MailgunEmailService {
     this.sharedApiKey = this.config.get<string>('MAILGUN_API_KEY')?.trim() ?? '';
     this.sharedDomain = this.config.get<string>('MAILGUN_DOMAIN')?.trim() ?? '';
     this.sharedFromEmail = this.config.get<string>('MAILGUN_FROM_EMAIL')?.trim() ?? '';
+    this.sharedFromName = this.config.get<string>('MAILGUN_FROM_NAME')?.trim() ?? '';
     this.fallbackReplyTo = this.config.get<string>('MAILGUN_REPLY_TO_EMAIL')?.trim() ?? '';
 
     if (!this.sharedApiKey || !this.sharedDomain || !this.sharedFromEmail) {
@@ -73,7 +75,8 @@ export class MailgunEmailService {
     const ownApiKey = business?.mailgunApiKey ? decrypt(business.mailgunApiKey) : '';
     const apiKey = ownApiKey || this.sharedApiKey;
     const domain = business?.mailgunDomain || this.sharedDomain;
-    const fromName = business?.mailgunFromName ? `${business.mailgunFromName} ` : '';
+    const resolvedFromName = business?.mailgunFromName || this.sharedFromName;
+    const fromName = resolvedFromName ? `${resolvedFromName} ` : '';
     const fromEmail = business?.mailgunFromEmail || this.sharedFromEmail;
 
     if (!apiKey || !domain || !fromEmail) {
