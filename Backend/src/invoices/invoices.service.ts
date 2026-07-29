@@ -1000,6 +1000,8 @@ export class InvoicesService {
           templateId: dto.templateId,
           customSubject: dto.customSubject,
           customBodyHtml: dto.customBodyHtml,
+          cc: dto.cc,
+          bcc: dto.bcc,
         });
         results.push({ invoiceId, invoiceNumber: inv?.invoiceNumber, success: true });
       } catch (err) {

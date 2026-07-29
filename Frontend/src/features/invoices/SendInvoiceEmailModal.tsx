@@ -17,6 +17,7 @@ import { emailTemplatesApi } from '../email/emailTemplatesApi';
 import type { EmailTemplate } from '../email/emailTemplatesApi';
 import { businessesApi } from '../businesses/businessesApi';
 import { savedEmailsApi } from '../businesses/savedEmailsApi';
+import { DEFAULT_INVOICE_CC, DEFAULT_INVOICE_BCC } from './invoiceEmailDefaults';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -76,8 +77,8 @@ export default function SendInvoiceEmailModal({ invoice, onClose, onSent }: Prop
   const [businessName, setBusinessName] = useState('');
 
   const [additionalTo, setAdditionalTo] = useState('');
-  const [cc, setCc] = useState('');
-  const [bcc, setBcc] = useState('');
+  const [cc, setCc] = useState(DEFAULT_INVOICE_CC);
+  const [bcc, setBcc] = useState(DEFAULT_INVOICE_BCC);
   const [savedEmails, setSavedEmails] = useState<string[]>([]);
 
   const [tab, setTab] = useState<'edit' | 'preview'>('edit');

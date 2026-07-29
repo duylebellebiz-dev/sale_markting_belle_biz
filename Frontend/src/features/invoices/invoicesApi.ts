@@ -250,6 +250,8 @@ export const invoicesApi = {
     templateId?: string;
     customSubject?: string;
     customBodyHtml?: string;
+    cc?: string;
+    bcc?: string;
   }) =>
     api
       .post<{

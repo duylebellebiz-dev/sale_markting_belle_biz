@@ -10,6 +10,13 @@ import { invoicesApi } from './invoicesApi';
 import { emailTemplatesApi } from '../email/emailTemplatesApi';
 import type { EmailTemplate } from '../email/emailTemplatesApi';
 import { businessesApi } from '../businesses/businessesApi';
+import { DEFAULT_INVOICE_CC, DEFAULT_INVOICE_BCC } from './invoiceEmailDefaults';
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function invalidEmails(raw: string): string[] {
+  return raw.split(',').map((e) => e.trim()).filter((e) => e && !EMAIL_RE.test(e));
+}
 
 function recipientEmail(inv: Invoice): string {
   return (
@@ -44,6 +51,8 @@ export default function BulkSendInvoiceEmailModal({ invoices, onClose, onSent }:
   const [selectedTemplateId, setSelectedTemplateId] = useState('');
   const [subject, setSubject] = useState('');
   const [bodyHtml, setBodyHtml] = useState('');
+  const [cc, setCc] = useState(DEFAULT_INVOICE_CC);
+  const [bcc, setBcc] = useState(DEFAULT_INVOICE_BCC);
 
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -77,6 +86,10 @@ export default function BulkSendInvoiceEmailModal({ invoices, onClose, onSent }:
       setError('None of the selected invoices have a customer email on file.');
       return;
     }
+    const badCc = invalidEmails(cc);
+    if (badCc.length) { setError(`Invalid CC address(es): ${badCc.join(', ')}`); return; }
+    const badBcc = invalidEmails(bcc);
+    if (badBcc.length) { setError(`Invalid BCC address(es): ${badBcc.join(', ')}`); return; }
     setError(null);
     setSending(true);
     try {
@@ -85,6 +98,8 @@ export default function BulkSendInvoiceEmailModal({ invoices, onClose, onSent }:
         templateId: selectedTemplateId || undefined,
         customSubject: subject.trim() || undefined,
         customBodyHtml: bodyHtml.trim() || undefined,
+        cc: cc.trim() || undefined,
+        bcc: bcc.trim() || undefined,
       });
       setResults(res.results);
       onSent();
@@ -158,6 +173,18 @@ export default function BulkSendInvoiceEmailModal({ invoices, onClose, onSent }:
                     {withoutEmail.length} invoice(s) will be skipped - no email address on file.
                   </p>
                 )}
+              </div>
+
+              {/* CC / BCC */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className={LABEL}>CC (optional)</label>
+                  <input value={cc} onChange={(e) => setCc(e.target.value)} className={INPUT} placeholder="you@example.com" />
+                </div>
+                <div>
+                  <label className={LABEL}>BCC (optional)</label>
+                  <input value={bcc} onChange={(e) => setBcc(e.target.value)} className={INPUT} placeholder="audit@example.com" />
+                </div>
               </div>
 
               {/* Template picker */}

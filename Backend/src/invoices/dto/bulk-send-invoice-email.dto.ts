@@ -21,4 +21,14 @@ export class BulkSendInvoiceEmailDto {
   @IsOptional()
   @IsString()
   customBodyHtml?: string;
+
+  /** Comma-separated CC email addresses, applied to every invoice in this send. */
+  @IsOptional()
+  @IsString()
+  cc?: string;
+
+  /** Comma-separated BCC email addresses, applied to every invoice in this send. */
+  @IsOptional()
+  @IsString()
+  bcc?: string;
 }
