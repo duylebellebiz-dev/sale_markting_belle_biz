@@ -8,8 +8,13 @@ import type { Invoice } from '../features/invoices/invoicesApi';
 import { useAuth } from '../context/AuthContext';
 import { usePermission } from '../features/staff/usePermission';
 import SendInvoiceEmailModal from '../features/invoices/SendInvoiceEmailModal';
+import BulkSendInvoiceEmailModal from '../features/invoices/BulkSendInvoiceEmailModal';
 
-type Modal = { type: 'sendEmail'; invoice: Invoice } | null;
+type Modal = { type: 'sendEmail'; invoice: Invoice } | { type: 'bulkSendEmail'; invoices: Invoice[] } | null;
+
+function canEmailInvoice(inv: Invoice) {
+  return !['Paid', 'Cancelled'].includes(inv.status);
+}
 
 function customerName(inv: Invoice) {
   if (typeof inv.customerId === 'object') return inv.customerId.customerName;
@@ -51,6 +56,7 @@ export default function InvoicesPage() {
   const [dueTo, setDueTo] = useState('');
   const [actionError, setActionError] = useState<string | null>(null);
   const [confirmId, setConfirmId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   function extractError(err: unknown) {
     const msg = (err as { response?: { data?: { message?: string | string[] } } })?.response?.data?.message;
@@ -76,6 +82,23 @@ export default function InvoicesPage() {
     return matchSearch && matchStatus && matchDueFrom && matchDueTo;
   });
 
+  const selectableFiltered = filtered.filter(canEmailInvoice);
+  const selectedInvoices = filtered.filter((inv) => selectedIds.has(inv.id));
+  const allSelectableSelected =
+    selectableFiltered.length > 0 && selectableFiltered.every((inv) => selectedIds.has(inv.id));
+
+  function toggleSelected(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    setSelectedIds(allSelectableSelected ? new Set() : new Set(selectableFiltered.map((inv) => inv.id)));
+  }
+
   // Summary stats for partially-paid invoices
   const partialCount  = invoices.filter((i) => i.status === 'PartiallyPaid').length;
   const overdueCount  = invoices.filter((i) => i.status === 'Overdue').length;
@@ -95,14 +118,24 @@ export default function InvoicesPage() {
               {isOwner ? 'All invoices across your business' : 'Invoices for your customers'}
             </p>
           </div>
-          {canInvoice && (
-            <button
-              onClick={() => navigate('/invoices/new')}
-              className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 transition-colors"
-            >
-              + New Invoice
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            {canSendEmail && selectedInvoices.length > 0 && (
+              <button
+                onClick={() => setModal({ type: 'bulkSendEmail', invoices: selectedInvoices })}
+                className="px-4 py-2 rounded-lg bg-white border border-indigo-300 text-indigo-700 text-sm font-medium hover:bg-indigo-50 transition-colors"
+              >
+                Send Selected ({selectedInvoices.length})
+              </button>
+            )}
+            {canInvoice && (
+              <button
+                onClick={() => navigate('/invoices/new')}
+                className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 transition-colors"
+              >
+                + New Invoice
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Quick stats */}
@@ -218,6 +251,18 @@ export default function InvoicesPage() {
                 <table className="min-w-full text-sm">
                   <thead>
                     <tr className="border-b border-gray-200 bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
+                      {canSendEmail && (
+                        <th className="px-4 py-3 w-8">
+                          <input
+                            type="checkbox"
+                            checked={allSelectableSelected}
+                            onChange={toggleSelectAll}
+                            disabled={selectableFiltered.length === 0}
+                            className="rounded border-gray-300"
+                            title="Select all"
+                          />
+                        </th>
+                      )}
                       <Th>Invoice #</Th>
                       <Th>Customer</Th>
                       <Th right>Total</Th>
@@ -239,6 +284,18 @@ export default function InvoicesPage() {
                           key={inv.id}
                           className={`hover:bg-gray-50 transition-colors ${isPartial ? 'bg-amber-50/40' : ''}`}
                         >
+                          {canSendEmail && (
+                            <td className="px-4 py-3">
+                              {canEmailInvoice(inv) && (
+                                <input
+                                  type="checkbox"
+                                  checked={selectedIds.has(inv.id)}
+                                  onChange={() => toggleSelected(inv.id)}
+                                  className="rounded border-gray-300"
+                                />
+                              )}
+                            </td>
+                          )}
                           {/* Invoice # - clickable link to detail */}
                           <td className="px-4 py-3 whitespace-nowrap">
                             <button
@@ -385,6 +442,14 @@ export default function InvoicesPage() {
           invoice={modal.invoice}
           onClose={() => setModal(null)}
           onSent={() => { setModal(null); reload(); }}
+        />
+      )}
+
+      {modal?.type === 'bulkSendEmail' && (
+        <BulkSendInvoiceEmailModal
+          invoices={modal.invoices}
+          onClose={() => setModal(null)}
+          onSent={() => { setSelectedIds(new Set()); reload(); }}
         />
       )}
     </AppShell>

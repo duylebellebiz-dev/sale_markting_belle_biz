@@ -152,13 +152,14 @@ export default function CustomerForm({ initial, staff, isOwner, onSubmit, onClos
           </Field>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Field label="Email">
+            <Field label="Email" hint="Separate multiple emails with commas">
               <input
                 type="email"
+                multiple
                 value={form.email}
                 onChange={(e) => set('email', e.target.value)}
                 className={INPUT}
-                placeholder="customer@example.com"
+                placeholder="customer@example.com, shop@example.com"
               />
             </Field>
 
@@ -258,11 +259,12 @@ export default function CustomerForm({ initial, staff, isOwner, onSubmit, onClos
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-1">
       <label className="text-xs font-medium text-gray-600 uppercase tracking-wide">{label}</label>
       {children}
+      {hint && <span className="text-xs text-gray-400">{hint}</span>}
     </div>
   );
 }

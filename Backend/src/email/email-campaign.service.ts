@@ -19,25 +19,12 @@ import { MailgunEmailService } from './mailgun-email.service';
 import { EmailTrackingService } from './email-tracking.service';
 import { SendCampaignDto, SegmentFilter } from './dto/send-campaign.dto';
 import type { RequestUser } from '../common/decorators/current-user.decorator';
+import { parseEmailList } from '../common/email-list.util';
 
 const DAILY_CAP = 100;
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-/** Parses a comma-separated email list, trimming and validating each address. */
-export function parseEmailList(raw: string | undefined, label: string): string[] {
-  if (!raw) return [];
-  const emails = raw
-    .split(',')
-    .map((e) => e.trim())
-    .filter((e) => e.length > 0);
-  const invalid = emails.filter((e) => !EMAIL_RE.test(e));
-  if (invalid.length) {
-    throw new BadRequestException(
-      `${label} contains invalid email address(es): ${invalid.join(', ')}`,
-    );
-  }
-  return emails;
-}
+// Re-exported for backward compatibility with existing importers (e.g. invoices.service.ts).
+export { parseEmailList };
 
 const SENT_STATUSES: EmailLogStatus[] = [
   EmailLogStatus.sent,

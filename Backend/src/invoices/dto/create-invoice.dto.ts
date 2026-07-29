@@ -17,10 +17,10 @@ export class LineItemDto {
   @IsString()
   serviceId?: string;
 
+  @IsOptional()
   @IsString()
-  @MinLength(1)
   @MaxLength(500)
-  description: string;
+  description?: string;
 
   @IsOptional()
   @IsString()

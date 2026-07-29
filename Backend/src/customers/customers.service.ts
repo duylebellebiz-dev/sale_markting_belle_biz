@@ -10,7 +10,14 @@ import { CreateCustomerDto } from './dto/create-customer.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
 import { RescheduleFollowUpDto } from './dto/reschedule-followup.dto';
 import { CloseLostDto } from './dto/close-lost.dto';
+import { parseEmailList } from '../common/email-list.util';
 import type { RequestUser } from '../common/decorators/current-user.decorator';
+
+/** Validates a customer's (optionally comma-separated) email field and normalizes its formatting. */
+function normalizeCustomerEmail(raw: string | undefined): string {
+  if (!raw) return '';
+  return parseEmailList(raw, 'Email').join(', ');
+}
 
 // Reusable include for user-facing reads: show the assigned salesperson's name/email
 const WITH_ASSIGNEE = {
@@ -76,7 +83,7 @@ export class CustomersService {
           customerName: dto.customerName ?? '',
           shopName: dto.shopName ?? '',
           shopAddress: dto.shopAddress ?? '',
-          email: dto.email ?? '',
+          email: normalizeCustomerEmail(dto.email),
           phoneNumber: dto.phoneNumber ?? '',
           shopPhoneNumber: dto.shopPhoneNumber ?? '',
           contactSource: dto.contactSource ?? '',
@@ -156,7 +163,7 @@ export class CustomersService {
     if (dto.customerName  !== undefined) data.customerName  = dto.customerName;
     if (dto.shopName      !== undefined) data.shopName      = dto.shopName;
     if (dto.shopAddress   !== undefined) data.shopAddress   = dto.shopAddress;
-    if (dto.email         !== undefined) data.email         = dto.email;
+    if (dto.email         !== undefined) data.email         = normalizeCustomerEmail(dto.email);
     if (dto.phoneNumber   !== undefined) data.phoneNumber   = dto.phoneNumber;
     if (dto.shopPhoneNumber !== undefined) data.shopPhoneNumber = dto.shopPhoneNumber;
     if (dto.contactSource !== undefined) data.contactSource = dto.contactSource;

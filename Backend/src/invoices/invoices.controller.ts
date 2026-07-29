@@ -16,6 +16,7 @@ import { UpdateInvoiceDto } from './dto/update-invoice.dto';
 import { AddPaymentDto } from './dto/add-payment.dto';
 import { UpdatePromisedDateDto } from './dto/update-promised-date.dto';
 import { SendInvoiceEmailDto } from './dto/send-invoice-email.dto';
+import { BulkSendInvoiceEmailDto } from './dto/bulk-send-invoice-email.dto';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { RequirePermission } from '../common/decorators/require-permission.decorator';
 import type { RequestUser } from '../common/decorators/current-user.decorator';
@@ -38,6 +39,14 @@ export class InvoicesController {
   @Get()
   findAll(@CurrentUser() user: RequestUser) {
     return this.invoicesService.findAll(user);
+  }
+
+  // Static sub-path — must come before :id/... routes to avoid conflicts
+  @RequirePermission('sendEmail')
+  @RequirePermission('exportInvoicePdf')
+  @Post('send-bulk')
+  sendBulkEmail(@CurrentUser() user: RequestUser, @Body() dto: BulkSendInvoiceEmailDto) {
+    return this.invoicesService.sendInvoiceEmailBulk(user, dto);
   }
 
   // Static sub-paths must come before :id to avoid route conflicts

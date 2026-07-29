@@ -309,7 +309,6 @@ export default function InvoiceForm({ initial, onSubmit, onClose }: Props) {
     if (!normalizedInvoiceNumber) { setError('Invoice number is required.'); return; }
 
     for (const row of rows) {
-      if (!row.description.trim()) { setError('Each line item must have a description.'); return; }
       const qty = parseFloat(row.quantity);
       const rate = parseFloat(row.rate);
       if (isNaN(qty) || qty < 0) { setError('Line item quantity must be a valid non-negative number.'); return; }
@@ -505,7 +504,7 @@ export default function InvoiceForm({ initial, onSubmit, onClose }: Props) {
                   <input
                     value={row.description}
                     onChange={(e) => updateRow(row.id, 'description', e.target.value)}
-                    placeholder="Item description"
+                    placeholder="Item description (optional)"
                     maxLength={500}
                     className={INPUT_SM}
                   />

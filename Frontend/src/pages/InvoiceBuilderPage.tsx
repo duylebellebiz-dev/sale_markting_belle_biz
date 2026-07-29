@@ -425,9 +425,6 @@ export default function InvoiceBuilderPage() {
     if (!customerId)          { setActionErr('Please select a customer.');               return null; }
     const normalizedInvoiceNumber = asText(invoiceNumber).trim();
     if (!normalizedInvoiceNumber){ setActionErr('Invoice number is required.');          return null; }
-    for (const r of rows) {
-      if (!r.description.trim()) { setActionErr('Each line item needs a description.'); return null; }
-    }
     setActionErr(null);
     return {
       customerId,
@@ -1121,7 +1118,7 @@ function LineItemRow({
           <input
             value={row.description}
             onChange={e => onUpdate({ description: e.target.value })}
-            placeholder={row.serviceId ? 'Description (editable)' : 'Item or service description'}
+            placeholder={row.serviceId ? 'Description (editable)' : 'Item or service description (optional)'}
             maxLength={500}
             className={INPUT_SM + ' min-w-0 flex-1'}
           />

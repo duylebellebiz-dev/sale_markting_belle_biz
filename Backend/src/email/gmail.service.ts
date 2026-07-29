@@ -13,6 +13,7 @@ import * as crypto from 'crypto';
 import { GmailConnectionStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { encrypt, decrypt } from '../common/crypto';
+import { emailListContains } from '../common/email-list.util';
 import { NotificationsService } from '../notifications/notifications.service';
 
 const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
@@ -306,10 +307,14 @@ export class GmailService {
     const fromAddr = extractEmail(parsed.from);
     if (fromAddr.toLowerCase() === ownMailbox.toLowerCase()) return;
 
-    const customer = await this.prisma.customer.findFirst({
-      where: { businessId, email: { equals: fromAddr, mode: 'insensitive' } },
-      select: { id: true, assignedToId: true, customerName: true },
+    // A customer's `email` field may hold several comma-separated addresses, so we
+    // can't use an exact-match query — narrow with `contains` then verify the exact
+    // address against each comma-separated entry.
+    const candidates = await this.prisma.customer.findMany({
+      where: { businessId, email: { contains: fromAddr, mode: 'insensitive' } },
+      select: { id: true, assignedToId: true, customerName: true, email: true },
     });
+    const customer = candidates.find((c) => emailListContains(c.email, fromAddr)) ?? null;
 
     await this.prisma.emailMessage.create({
       data: {

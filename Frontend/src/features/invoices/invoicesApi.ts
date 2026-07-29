@@ -245,6 +245,26 @@ export const invoicesApi = {
   ) =>
     api.post<{ message: string }>(`/invoices/${id}/send-email`, payload).then(d<{ message: string }>),
 
+  sendBulkEmail: (payload: {
+    invoiceIds: string[];
+    templateId?: string;
+    customSubject?: string;
+    customBodyHtml?: string;
+  }) =>
+    api
+      .post<{
+        sent: number;
+        failed: number;
+        results: Array<{ invoiceId: string; invoiceNumber?: string; success: boolean; error?: string }>;
+      }>('/invoices/send-bulk', payload)
+      .then(
+        d<{
+          sent: number;
+          failed: number;
+          results: Array<{ invoiceId: string; invoiceNumber?: string; success: boolean; error?: string }>;
+        }>,
+      ),
+
   downloadPdf: async (id: string, invoiceNumber: string) => {
     try {
       const res = await api.get<Blob>(`/invoices/${id}/pdf`, { responseType: 'blob' });

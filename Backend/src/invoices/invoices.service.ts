@@ -13,6 +13,7 @@ import { UpdateInvoiceDto } from './dto/update-invoice.dto';
 import { AddPaymentDto } from './dto/add-payment.dto';
 import { UpdatePromisedDateDto } from './dto/update-promised-date.dto';
 import { SendInvoiceEmailDto } from './dto/send-invoice-email.dto';
+import { BulkSendInvoiceEmailDto } from './dto/bulk-send-invoice-email.dto';
 import { parseEmailList } from '../email/email-campaign.service';
 import type { RequestUser } from '../common/decorators/current-user.decorator';
 
@@ -89,7 +90,7 @@ function computeTotals(
 ): ComputedTotals {
   const lineItems: ComputedItem[] = rawItems.map((i) => ({
     serviceId:   i.serviceId ?? null,
-    description: i.description,
+    description: i.description ?? '',
     serviceTerm: i.serviceTerm ?? '',
     quantity:    i.quantity,
     rate:        i.rate,
@@ -974,6 +975,52 @@ export class InvoicesService {
     });
 
     return { message: 'Invoice emailed successfully' };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Email several invoices in one action (each to its own customer, with its own
+  // PDF attached). Reuses sendInvoiceEmail per invoice; one bad invoice never
+  // aborts the rest — collect a per-invoice result summary instead.
+  // ---------------------------------------------------------------------------
+  async sendInvoiceEmailBulk(user: RequestUser, dto: BulkSendInvoiceEmailDto) {
+    const results: Array<{
+      invoiceId: string;
+      invoiceNumber?: string;
+      success: boolean;
+      error?: string;
+    }> = [];
+
+    for (const invoiceId of dto.invoiceIds) {
+      const inv = await this.prisma.invoice.findFirst({
+        where: { id: invoiceId, businessId: user.businessId },
+        select: { invoiceNumber: true },
+      });
+      try {
+        await this.sendInvoiceEmail(user, invoiceId, {
+          templateId: dto.templateId,
+          customSubject: dto.customSubject,
+          customBodyHtml: dto.customBodyHtml,
+        });
+        results.push({ invoiceId, invoiceNumber: inv?.invoiceNumber, success: true });
+      } catch (err) {
+        results.push({
+          invoiceId,
+          invoiceNumber: inv?.invoiceNumber,
+          success: false,
+          error: err instanceof Error ? err.message : 'Failed to send',
+        });
+      }
+    }
+
+    const sent = results.filter((r) => r.success).length;
+    const failed = results.length - sent;
+
+    return {
+      data: { sent, failed, results },
+      message: failed
+        ? `Sent ${sent} invoice(s). ${failed} failed — see details.`
+        : `Sent ${sent} invoice(s) successfully.`,
+    };
   }
 
   private defaultInvoiceHtml(invoice: any, ctx: Record<string, string>, bizName: string): string {
