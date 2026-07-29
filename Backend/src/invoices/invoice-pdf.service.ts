@@ -622,6 +622,11 @@ export class InvoicePdfService {
     y += 2;
 
     row('Total', d$(inv.total ?? 0), true);
+
+    if ((inv.amountPaid ?? 0) > 0) {
+      row('Amount Paid', `-${n$(inv.amountPaid)}`);
+    }
+
     y += 4;
 
     const boxH  = 26;
