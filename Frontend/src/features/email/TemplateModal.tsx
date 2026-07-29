@@ -227,6 +227,7 @@ export default function TemplateModal({ initial, onSave, onClose }: Props) {
             <code className="bg-amber-100 rounded px-1">{'{shop_name}'}</code>{' '}
             <code className="bg-amber-100 rounded px-1">{'{salesperson_name}'}</code>{' '}
             <code className="bg-amber-100 rounded px-1">{'{invoice_amount}'}</code>{' '}
+            <code className="bg-amber-100 rounded px-1">{'{balance_due}'}</code>{' '}
             <code className="bg-amber-100 rounded px-1">{'{service_name}'}</code>{' '}
             <code className="bg-amber-100 rounded px-1">{'{expiry_date}'}</code>{' '}
             <code className="bg-amber-100 rounded px-1">{'{invoice_number}'}</code>{' '}

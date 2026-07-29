@@ -54,10 +54,23 @@ export interface InvoiceCustomer {
   assignedTo?: string | { id: string; fullName: string; email: string };
 }
 
+// Populated by the backend's `include: { customer: {...} }` (Prisma relation).
+// `customerId` itself is always the plain scalar FK string — the live customer
+// record (with email/phone) comes back separately under `customer`.
+export interface InvoicePopulatedCustomer {
+  id: string;
+  customerName: string;
+  shopName?: string;
+  email?: string;
+  phoneNumber?: string;
+  assignedToId?: string;
+}
+
 export interface Invoice {
   id: string;
   businessId: string;
   customerId: InvoiceCustomer | string;
+  customer?: InvoicePopulatedCustomer;
   invoiceNumber: string;
   invoiceDate?: string;
   dueDate?: string;

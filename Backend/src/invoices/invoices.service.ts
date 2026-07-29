@@ -891,6 +891,7 @@ export class InvoicesService {
       customer_name:    billTo?.name || 'Valued Customer',
       shop_name:        invoice.customer.shopName || '',
       invoice_amount:   `$${Number(invoice.total).toFixed(2)}`,
+      balance_due:      `$${Number(invoice.balanceDue ?? 0).toFixed(2)}`,
       service_name:     firstItem?.description || '',
       expiry_date:      '',
       salesperson_name: '',

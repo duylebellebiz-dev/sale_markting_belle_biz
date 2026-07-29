@@ -21,6 +21,7 @@ function invalidEmails(raw: string): string[] {
 function recipientEmail(inv: Invoice): string {
   return (
     inv.billTo?.email ||
+    inv.customer?.email ||
     (typeof inv.customerId === 'object' ? (inv.customerId as any).email : '') ||
     ''
   );
@@ -28,6 +29,7 @@ function recipientEmail(inv: Invoice): string {
 
 function customerLabel(inv: Invoice): string {
   if (inv.billTo?.name) return inv.billTo.name;
+  if (inv.customer?.customerName) return inv.customer.customerName;
   if (typeof inv.customerId === 'object') return inv.customerId.customerName;
   return '-';
 }
@@ -205,6 +207,7 @@ export default function BulkSendInvoiceEmailModal({ invoices, onClose, onSent }:
               <div className="rounded-lg bg-blue-50 border border-blue-100 px-3 py-2">
                 <p className="text-xs text-blue-700">
                   Variables like <span className="font-mono">{'{customer_name}'}</span>, <span className="font-mono">{'{invoice_amount}'}</span>,{' '}
+                  <span className="font-mono">{'{balance_due}'}</span>,{' '}
                   <span className="font-mono">{'{invoice_number}'}</span> are personalized per invoice when sent.
                   {businessName && <> Business: <span className="font-medium">{businessName}</span>.</>}
                 </p>

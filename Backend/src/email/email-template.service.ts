@@ -19,6 +19,7 @@ function escapeHtml(value: string): string {
 export interface TemplateContext {
   customer_name?: string;
   invoice_amount?: string;
+  balance_due?: string;
   service_name?: string;
   expiry_date?: string;
   shop_name?: string;

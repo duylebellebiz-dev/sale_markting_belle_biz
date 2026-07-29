@@ -39,11 +39,12 @@ function renderVars(text: string, vars: Record<string, string>): string {
 }
 
 function buildVars(inv: Invoice, businessName: string): Record<string, string> {
-  const customerObj = typeof inv.customerId === 'object' ? inv.customerId : null;
+  const customerObj = inv.customer ?? (typeof inv.customerId === 'object' ? inv.customerId : null);
   return {
     customer_name:    inv.billTo?.name || customerObj?.customerName || 'Valued Customer',
-    shop_name:        (customerObj as any)?.shopName || '',
+    shop_name:        customerObj?.shopName || '',
     invoice_amount:   `$${(Number(inv.total) || 0).toFixed(2)}`,
+    balance_due:      `$${(Number(inv.balanceDue) || 0).toFixed(2)}`,
     service_name:     inv.lineItems?.[0]?.description || '',
     expiry_date:      '',
     salesperson_name: '',
@@ -88,6 +89,7 @@ export default function SendInvoiceEmailModal({ invoice, onClose, onSent }: Prop
   const vars = buildVars(invoice, businessName);
   const recipientEmail =
     invoice.billTo?.email ||
+    invoice.customer?.email ||
     (typeof invoice.customerId === 'object' ? (invoice.customerId as any).email : '') ||
     '';
 
@@ -294,6 +296,7 @@ export default function SendInvoiceEmailModal({ invoice, onClose, onSent }: Prop
                 ['{customer_name}', vars.customer_name],
                 ['{shop_name}', vars.shop_name || '(empty)'],
                 ['{invoice_amount}', vars.invoice_amount],
+                ['{balance_due}', vars.balance_due],
                 ['{service_name}', vars.service_name || '(empty)'],
                 ['{invoice_number}', vars.invoice_number || '(empty)'],
                 ['{business_name}', vars.business_name || '(empty)'],
