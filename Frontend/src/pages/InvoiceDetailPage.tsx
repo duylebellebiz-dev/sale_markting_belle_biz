@@ -12,7 +12,7 @@ import { displayTaxLabel } from '../lib/canadaTaxRates';
 //  Helpers 
 
 function money(n: number) {
-  return n.toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return Number(n).toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function fmtDate(iso?: string) {
@@ -333,7 +333,7 @@ export default function InvoiceDetailPage() {
   const isDraft      = status === 'Draft';
   const needsPayment = status === 'Sent' || status === 'Overdue' || isPartial;
 
-  const paidSoFar = invoice.payments?.reduce((s, p) => s + p.amount, 0) ?? invoice.amountPaid ?? 0;
+  const paidSoFar = invoice.payments?.reduce((s, p) => s + Number(p.amount), 0) ?? invoice.amountPaid ?? 0;
   const balance   = invoice.balanceDue ?? 0;
   const total     = invoice.total ?? 0;
   const custName  = typeof invoice.customerId === 'object' ? invoice.customerId.customerName : '-';

@@ -12,7 +12,7 @@ function fmt(iso: string) {
 }
 
 function money(n: number) {
-  return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 export default function PaymentHistoryPanel({ invoice, onDelete, onClose }: Props) {
@@ -90,7 +90,7 @@ export default function PaymentHistoryPanel({ invoice, onDelete, onClose }: Prop
                 <tr className="border-t border-gray-200">
                   <td colSpan={2} className="pt-3 text-xs font-semibold text-gray-500 uppercase">Paid</td>
                   <td className="pt-3 text-right font-bold text-gray-900">
-                    ${money(history.reduce((s, p) => s + p.amount, 0))}
+                    ${money(history.reduce((s, p) => s + Number(p.amount), 0))}
                   </td>
                   <td colSpan={2} />
                 </tr>
