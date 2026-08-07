@@ -77,6 +77,7 @@ const STREET_SUFFIXES = new Set([
   'TERR', 'TERRACE', 'TRAIL', 'VIEW', 'WAY',
 ]);
 const UNIT_MARKERS = new Set(['#', 'APT', 'APARTMENT', 'BAY', 'BUILDING', 'FL', 'FLOOR', 'RM', 'ROOM', 'STE', 'SUITE', 'UNIT']);
+const DIRECTIONAL_SUFFIXES = new Set(['N', 'S', 'E', 'W', 'NE', 'NW', 'SE', 'SW']);
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -138,6 +139,10 @@ function splitStreetAndCity(prefix: string) {
     const token = tokens[i].replace(/[.,]/g, '').toUpperCase();
     if (STREET_SUFFIXES.has(token)) {
       boundary = i;
+      const next = tokens[i + 1]?.replace(/[.,]/g, '').toUpperCase();
+      if (next && DIRECTIONAL_SUFFIXES.has(next)) {
+        boundary = i + 1;
+      }
       continue;
     }
     if (UNIT_MARKERS.has(token)) {
