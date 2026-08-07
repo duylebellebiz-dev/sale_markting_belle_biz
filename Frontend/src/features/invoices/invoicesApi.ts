@@ -105,6 +105,7 @@ export interface Invoice {
 export interface LineItemPayload {
   serviceId?: string;
   description: string;
+  serviceTerm?: string;
   quantity: number;
   rate: number;
 }

@@ -46,6 +46,7 @@ interface LineRow {
   serviceName: string;     // display label for the badge
   // editable fields (may be overridden after auto-fill)
   description: string;
+  serviceTerm: string;
   quantity: string;
   rate: string;
 }
@@ -65,7 +66,7 @@ function today() { return new Date().toISOString().slice(0, 10); }
 function asText(value: unknown) { return typeof value === 'string' ? value : String(value ?? ''); }
 
 function blankRow(): LineRow {
-  return { id: uid(), serviceId: '', serviceName: '', description: '', quantity: '1', rate: '' };
+  return { id: uid(), serviceId: '', serviceName: '', description: '', serviceTerm: '', quantity: '1', rate: '' };
 }
 
 function rowFromService(svc: ServiceOption): LineRow {
@@ -73,7 +74,8 @@ function rowFromService(svc: ServiceOption): LineRow {
     id: uid(),
     serviceId: svc.id,
     serviceName: svc.name,
-    description: svc.name,
+    description: '',
+    serviceTerm: '',
     quantity: '1',
     rate: String(svc.price),
   };
@@ -312,7 +314,8 @@ export default function InvoiceBuilderPage() {
             id:          uid(),
             serviceId:   li.serviceId ?? '',
             serviceName: '',    // resolved after services load (see effect below)
-            description: li.serviceTerm ? `${li.description} — ${li.serviceTerm}` : li.description,
+            description: li.description ?? '',
+            serviceTerm: li.serviceTerm ?? '',
             quantity:    String(li.quantity),
             rate:        String(li.rate),
           }))
@@ -387,7 +390,7 @@ export default function InvoiceBuilderPage() {
   function applyService(rowId: string, svc: ServiceOption) {
     setRows(prev => prev.map(r =>
       r.id === rowId
-        ? { ...r, serviceId: svc.id, serviceName: svc.name, description: svc.name, rate: String(svc.price) }
+        ? { ...r, serviceId: svc.id, serviceName: svc.name, rate: String(svc.price) }
         : r,
     ));
   }
@@ -435,6 +438,7 @@ export default function InvoiceBuilderPage() {
       lineItems: rows.map(r => ({
         serviceId:   r.serviceId || undefined,
         description: r.description.trim(),
+        serviceTerm: r.serviceTerm.trim() || undefined,
         quantity:    parseFloat(r.quantity) || 0,
         rate:        parseFloat(r.rate)     || 0,
       })),
@@ -1118,7 +1122,7 @@ function LineItemRow({
           <input
             value={row.description}
             onChange={e => onUpdate({ description: e.target.value })}
-            placeholder={row.serviceId ? 'Description (editable)' : 'Item or service description (optional)'}
+            placeholder={row.serviceId ? 'Additional description (optional)' : 'Item or service description (optional)'}
             maxLength={500}
             className={INPUT_SM + ' min-w-0 flex-1'}
           />
@@ -1131,6 +1135,18 @@ function LineItemRow({
               Pick service
             </button>
           )}
+        </div>
+
+        {/* Service Term input - e.g. the coverage period for a subscription/service line */}
+        <div className="flex items-center gap-1.5 min-w-0">
+          <span className="shrink-0 text-xs font-medium text-gray-400">Service Term:</span>
+          <input
+            value={row.serviceTerm}
+            onChange={e => onUpdate({ serviceTerm: e.target.value })}
+            placeholder="e.g. June 15, 2026 - June 14, 2027"
+            maxLength={200}
+            className={INPUT_SM + ' min-w-0 flex-1 text-gray-500'}
+          />
         </div>
 
         {/* Inline service dropdown for this row */}
